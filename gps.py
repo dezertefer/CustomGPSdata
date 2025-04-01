@@ -72,15 +72,6 @@ def move_drone_attitude(master, forward=True):
 def main():
     master = connect_to_sitl()
 
-    # Set mode to GUIDED and arm the drone.
-    print("Setting mode to GUIDED")
-    master.set_mode(mavutil.mavlink.MAV_MODE_GUIDED_ARMED)
-    print("Arming the drone")
-    master.arducopter_arm()
-
-    # Wait a short time for the autopilot to arm.
-    time.sleep(2)
-
     # Loop: alternate forward and backward movement.
     for i in range(10):
         print(f"Cycle {i+1}: Moving forward")
@@ -91,9 +82,6 @@ def main():
         time.sleep(1)
 
     # Disarm and close connection.
-    print("Disarming the drone")
-    master.arducopter_disarm()
-    master.close()
 
 if __name__ == '__main__':
     main()
