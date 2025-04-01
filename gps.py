@@ -1,40 +1,59 @@
-import time
 from pymavlink import mavutil
+import time
 
-def main():
-    # Connect to Ardupilot (adjust the connection string and port as needed)
-    master = mavutil.mavlink_connection('udpout:127.0.0.1:14550')
-    master.wait_heartbeat()
-    print("Connected to system (system %u component %u)" % (master.target_system, master.target_component))
+# Connect to the SITL
+connection_string = "tcp:127.0.0.1:5760"
+master = mavutil.mavlink_connection(connection_string)
+master.wait_heartbeat()
+print("Connected to SITL on 127.0.0.1:5760")
 
-    # Define initial GPS data (using GPS_RAW_INT message format)
-    # Note: lat and lon are in degrees * 1e7, altitude in mm
-    lat = int(47.397742 * 1e7)   # example latitude
-    lon = int(8.545594 * 1e7)    # example longitude
-    alt = int(500 * 1000)        # example altitude: 500 meters
-    eph = 100                    # GPS horizontal dilution of precision
-    epv = 100                    # GPS vertical dilution of precision
-    vel = 0                    # GPS ground speed (cm/s)
-    cog = 0                    # course over ground (degrees * 100)
-    satellites_visible = 10      # number of satellites
+# Set the mode to GUIDED
+print("Setting mode to GUIDED")
+master.set_mode(mavutil.mavlink.MAV_MODE_GUIDED_ARMED)
 
-    # Send simulated GPS messages continuously
-    while True:
-        # The first parameter is the timestamp in milliseconds
-        master.mav.gps_raw_int_send(
-            int(time.time() * 1000),  # time stamp (ms)
-            3,                       # fix_type (3 for 3D fix)
-            lat,
-            lon,
-            alt,
-            eph,
-            epv,
-            vel,
-            cog,
-            satellites_visible
-        )
-        print("Simulated GPS message sent")
-        time.sleep(1)  # adjust frequency as needed
+# Arm the drone
+print("Arming the drone")
+master.arducopter_arm()
 
-if __name__ == '__main__':
-    main()
+# Wait for the drone to arm
+time.sleep(2)
+
+# Function to send the desired movement command
+def move_drone(forward=True):
+    # Define forward/backward velocity
+    velocity = 1.0 if forward else -1.0
+    print(f"Moving {'forward' if forward else 'backward'} with velocity {velocity}")
+
+    # Send the velocity command (move in the X direction)
+    master.mav.set_position_target_local_ned_send(
+        0,  # time_boot_ms
+        master.target_system,  # target_system
+        master.target_component,  # target_component
+        mavutil.mavlink.MAV_FRAME_LOCAL_NED,  # coordinate frame
+        0b0000111111001000,  # position/control flags (ignore altitude, velocity control)
+        0,  # x position (m)
+        0,  # y position (m)
+        0,  # z position (m)
+        velocity,  # x velocity (m/s)
+        0,  # y velocity (m/s)
+        0,  # z velocity (m/s)
+        0,  # acceleration in x (m/s^2)
+        0,  # acceleration in y (m/s^2)
+        0,  # acceleration in z (m/s^2)
+        0,  # yaw rate (rad/s)
+        0  # yaw (rad)
+    )
+
+# Move the drone forward and backward in a loop
+for _ in range(10):  # 10 cycles of forward and backward
+    move_drone(forward=True)
+    time.sleep(1)
+    move_drone(forward=False)
+    time.sleep(1)
+
+# Disarm the drone
+print("Disarming the drone")
+master.arducopter_disarm()
+
+# Close the connection
+master.close()
