@@ -32,11 +32,11 @@ def connect_to_sitl():
           (master.target_system, master.target_component))
     return master
 
-def send_attitude_target(master, roll=0.0, pitch=0.0, yaw=0.0):
+def send_attitude_target(master, roll=0.0, pitch=0.0, yaw=0.0, thrust=0.5):
     """
-    Send SET_ATTITUDE_TARGET message with a type mask that ignores throttle.
+    Send SET_ATTITUDE_TARGET message without ignoring thrust.
     - roll, pitch, yaw are in radians.
-    - Thrust is ignored so the autopilot holds altitude.
+    - Thrust is included to maintain altitude control by the autopilot.
     """
     # Convert Euler angles to quaternion
     q = quaternion_from_euler(roll, pitch, yaw)
@@ -45,22 +45,22 @@ def send_attitude_target(master, roll=0.0, pitch=0.0, yaw=0.0):
     # Bit 0: ignore body roll rate
     # Bit 1: ignore body pitch rate
     # Bit 2: ignore body yaw rate
-    # Bit 3: ignore thrust (so autopilot controls throttle)
-    type_mask = 0b00001111  # decimal 15
+    # Bit 3: allow autopilot to control throttle (don't ignore thrust)
+    type_mask = 0b00000000  # decimal 0 (no bits ignored)
 
     # Calculate time_boot_ms as elapsed time since script start (in milliseconds)
     time_boot_ms = int((time.monotonic() - start_time) * 1000)
     
     master.mav.set_attitude_target_send(
         time_boot_ms,                    # time_boot_ms in milliseconds
-        master.target_system,            # target system
-        master.target_component,         # target component
-        type_mask,                       # type mask (ignore rates and thrust)
+        master.target_system,             # target system
+        master.target_component,          # target component
+        type_mask,                        # type mask (no bits ignored)
         q,                               # Quaternion [w, x, y, z]
         0, 0, 0,                         # Body roll rate, pitch rate, yaw rate (ignored)
-        0.0                              # Thrust (ignored due to type_mask)
+        thrust                            # Thrust (0.5 to hold hover, adjust for more/less)
     )
-    print(f"Sent attitude target: roll={roll:.3f}, pitch={pitch:.3f}, yaw={yaw:.3f} (thrust ignored)")
+    print(f"Sent attitude target: roll={roll:.3f}, pitch={pitch:.3f}, yaw={yaw:.3f}, thrust={thrust:.3f}")
 
 def move_drone_attitude(master, forward=True):
     """
@@ -73,10 +73,19 @@ def move_drone_attitude(master, forward=True):
     pitch = -angle_rad if forward else angle_rad
     direction = "forward" if forward else "backward"
     print(f"Commanding {direction} movement with pitch angle: {pitch:.3f} radians")
-    send_attitude_target(master, roll=0.0, pitch=pitch, yaw=0.0)
+    send_attitude_target(master, roll=0.0, pitch=pitch, yaw=0.0, thrust=0.5)
 
 def main():
     master = connect_to_sitl()
+
+    # Set mode to GUIDED and arm the drone.
+    print("Setting mode to GUIDED")
+    master.set_mode(mavutil.mavlink.MAV_MODE_GUIDED_ARMED)
+    print("Arming the drone")
+    master.arducopter_arm()
+
+    # Allow time for arming.
+    time.sleep(2)
 
     # Loop: alternate forward and backward movement.
     for i in range(10):
