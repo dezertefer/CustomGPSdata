@@ -1,33 +1,21 @@
 from pymavlink import mavutil
 import time
 
-# Function to establish connection (UDP or TCP)
+# Function to establish UDP connection
 def connect_to_sitl():
-    # Try TCP first
-    connection_string_tcp = "tcp:127.0.0.1:5760"
-    try:
-        master_tcp = mavutil.mavlink_connection(connection_string_tcp)
-        master_tcp.wait_heartbeat()
-        print("Connected to SITL via TCP on 127.0.0.1:5760")
-        return master_tcp
-    except Exception as e:
-        print(f"Failed to connect via TCP: {e}")
-    
-    # If TCP fails, try UDP
+    # Try UDP
     connection_string_udp = "udp:127.0.0.1:14550"
     try:
+        print("Trying to connect to SITL via UDP...")
         master_udp = mavutil.mavlink_connection(connection_string_udp)
         master_udp.wait_heartbeat()
         print("Connected to SITL via UDP on 127.0.0.1:14550")
         return master_udp
     except Exception as e:
         print(f"Failed to connect via UDP: {e}")
+        return None
 
-    # If both fail
-    print("Unable to connect to SITL.")
-    return None
-
-# Connect to SITL (TCP or UDP)
+# Connect to SITL (UDP)
 master = connect_to_sitl()
 
 if master is None:
