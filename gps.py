@@ -82,13 +82,6 @@ def turn_in_place(master, target_yaw, duration=2):
 def main():
     master = connect_to_sitl()
 
-    # Set mode to GUIDED and arm the drone.
-    print("Setting mode to GUIDED")
-    master.set_mode(mavutil.mavlink.MAV_MODE_GUIDED_ARMED)
-    print("Arming the drone")
-    master.arducopter_arm()
-    time.sleep(2)  # wait for arming
-
     # Start with an initial heading (yaw) of 0 radians.
     current_yaw = 0.0
 
