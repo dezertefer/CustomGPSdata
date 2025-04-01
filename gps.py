@@ -1,11 +1,37 @@
 from pymavlink import mavutil
 import time
 
-# Connect to the SITL
-connection_string = "tcp:127.0.0.1:5760"
-master = mavutil.mavlink_connection(connection_string)
-master.wait_heartbeat()
-print("Connected to SITL on 127.0.0.1:5760")
+# Function to establish connection (UDP or TCP)
+def connect_to_sitl():
+    # Try TCP first
+    connection_string_tcp = "tcp:127.0.0.1:5760"
+    try:
+        master_tcp = mavutil.mavlink_connection(connection_string_tcp)
+        master_tcp.wait_heartbeat()
+        print("Connected to SITL via TCP on 127.0.0.1:5760")
+        return master_tcp
+    except Exception as e:
+        print(f"Failed to connect via TCP: {e}")
+    
+    # If TCP fails, try UDP
+    connection_string_udp = "udp:127.0.0.1:14550"
+    try:
+        master_udp = mavutil.mavlink_connection(connection_string_udp)
+        master_udp.wait_heartbeat()
+        print("Connected to SITL via UDP on 127.0.0.1:14550")
+        return master_udp
+    except Exception as e:
+        print(f"Failed to connect via UDP: {e}")
+
+    # If both fail
+    print("Unable to connect to SITL.")
+    return None
+
+# Connect to SITL (TCP or UDP)
+master = connect_to_sitl()
+
+if master is None:
+    exit()  # Exit if connection fails
 
 # Set the mode to GUIDED
 print("Setting mode to GUIDED")
