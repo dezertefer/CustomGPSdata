@@ -1,73 +1,99 @@
 from pymavlink import mavutil
 import time
+import math
 
-# Function to establish UDP connection
+def quaternion_from_euler(roll, pitch, yaw):
+    """
+    Convert Euler angles (in radians) to quaternion.
+    Returns a list: [w, x, y, z]
+    """
+    cy = math.cos(yaw * 0.5)
+    sy = math.sin(yaw * 0.5)
+    cp = math.cos(pitch * 0.5)
+    sp = math.sin(pitch * 0.5)
+    cr = math.cos(roll * 0.5)
+    sr = math.sin(roll * 0.5)
+
+    w = cr * cp * cy + sr * sp * sy
+    x = sr * cp * cy - cr * sp * sy
+    y = cr * sp * cy + sr * cp * sy
+    z = cr * cp * sy - sr * sp * cy
+    return [w, x, y, z]
+
 def connect_to_sitl():
-    # Try UDP
-    connection_string_udp = "udp:127.0.0.1:14550"
-    try:
-        print("Trying to connect to SITL via UDP...")
-        master_udp = mavutil.mavlink_connection(connection_string_udp)
-        master_udp.wait_heartbeat()
-        print("Connected to SITL via UDP on 127.0.0.1:14550")
-        return master_udp
-    except Exception as e:
-        print(f"Failed to connect via UDP: {e}")
-        return None
+    connection_string = "udp:127.0.0.1:14550"
+    print("Connecting to SITL via UDP on", connection_string)
+    master = mavutil.mavlink_connection(connection_string)
+    master.wait_heartbeat()
+    print("Connected. Heartbeat from system (system %u, component %u)" %
+          (master.target_system, master.target_component))
+    return master
 
-# Connect to SITL (UDP)
-master = connect_to_sitl()
+def send_attitude_target(master, roll=0.0, pitch=0.0, yaw=0.0):
+    """
+    Send SET_ATTITUDE_TARGET message with a type mask that ignores thrust.
+    - roll, pitch, yaw are in radians.
+    - Thrust is ignored so the autopilot holds altitude.
+    """
+    # Convert Euler angles to quaternion
+    q = quaternion_from_euler(roll, pitch, yaw)
+    
+    # Set type_mask bits:
+    # Bit 0: ignore body roll rate
+    # Bit 1: ignore body pitch rate
+    # Bit 2: ignore body yaw rate
+    # Bit 3: ignore thrust
+    type_mask = 0b00001111  # 15 decimal
 
-if master is None:
-    exit()  # Exit if connection fails
-
-# Set the mode to GUIDED
-print("Setting mode to GUIDED")
-master.set_mode(mavutil.mavlink.MAV_MODE_GUIDED_ARMED)
-
-# Arm the drone
-print("Arming the drone")
-master.arducopter_arm()
-
-# Wait for the drone to arm
-time.sleep(2)
-
-# Function to send the desired movement command
-def move_drone(forward=True):
-    # Define forward/backward velocity
-    velocity = 1.0 if forward else -1.0
-    print(f"Moving {'forward' if forward else 'backward'} with velocity {velocity}")
-
-    # Send the velocity command (move in the X direction)
-    master.mav.set_position_target_local_ned_send(
-        0,  # time_boot_ms
-        master.target_system,  # target_system
-        master.target_component,  # target_component
-        mavutil.mavlink.MAV_FRAME_LOCAL_NED,  # coordinate frame
-        0b0000111111001000,  # position/control flags (ignore altitude, velocity control)
-        0,  # x position (m)
-        0,  # y position (m)
-        0,  # z position (m)
-        velocity,  # x velocity (m/s)
-        0,  # y velocity (m/s)
-        0,  # z velocity (m/s)
-        0,  # acceleration in x (m/s^2)
-        0,  # acceleration in y (m/s^2)
-        0,  # acceleration in z (m/s^2)
-        0,  # yaw rate (rad/s)
-        0  # yaw (rad)
+    master.mav.set_attitude_target_send(
+        int(round(time.time() * 1000)),  # time_boot_ms in milliseconds
+        master.target_system,             # target system
+        master.target_component,          # target component
+        type_mask,                        # type mask (ignore rates and thrust)
+        q,                                # Quaternion [w, x, y, z]
+        0, 0, 0,                          # Body roll rate, pitch rate, yaw rate (ignored)
+        0.0                               # Thrust (ignored due to type_mask)
     )
+    print(f"Sent attitude target: roll=0, pitch={pitch:.3f}, yaw=0 (thrust ignored)")
 
-# Move the drone forward and backward in a loop
-for _ in range(10):  # 10 cycles of forward and backward
-    move_drone(forward=True)
-    time.sleep(1)
-    move_drone(forward=False)
-    time.sleep(1)
+def move_drone_attitude(master, forward=True):
+    """
+    Commands a slight pitch to move the drone forward or backward.
+    For forward motion, pitch is set to a negative angle; for backward, positive.
+    """
+    angle_deg = 5.0
+    angle_rad = math.radians(angle_deg)
+    # Negative pitch for forward, positive for backward
+    pitch = -angle_rad if forward else angle_rad
+    direction = "forward" if forward else "backward"
+    print(f"Commanding {direction} movement with pitch angle: {pitch:.3f} radians")
+    send_attitude_target(master, roll=0.0, pitch=pitch, yaw=0.0)
 
-# Disarm the drone
-print("Disarming the drone")
-master.arducopter_disarm()
+def main():
+    master = connect_to_sitl()
 
-# Close the connection
-master.close()
+    # Set mode to GUIDED and arm the drone.
+    print("Setting mode to GUIDED")
+    master.set_mode(mavutil.mavlink.MAV_MODE_GUIDED_ARMED)
+    print("Arming the drone")
+    master.arducopter_arm()
+
+    # Wait a short time for the autopilot to arm.
+    time.sleep(2)
+
+    # Loop: alternate forward and backward movement.
+    for i in range(10):
+        print(f"Cycle {i+1}: Moving forward")
+        move_drone_attitude(master, forward=True)
+        time.sleep(1)
+        print(f"Cycle {i+1}: Moving backward")
+        move_drone_attitude(master, forward=False)
+        time.sleep(1)
+
+    # Disarm and close connection.
+    print("Disarming the drone")
+    master.arducopter_disarm()
+    master.close()
+
+if __name__ == '__main__':
+    main()
