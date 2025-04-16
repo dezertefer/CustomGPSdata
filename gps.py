@@ -140,7 +140,7 @@ def main():
     try:
         while True:
             # Command forward motion using a slight forward pitch.
-            forward_pitch_deg = 5
+            forward_pitch_deg = 35
             forward_pitch_rad = -math.radians(forward_pitch_deg)  # negative pitch = forward motion.
             send_attitude_target(master, roll=0.0, pitch=forward_pitch_rad, yaw=commanded_yaw, thrust=0.5)
             
