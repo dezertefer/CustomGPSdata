@@ -25,7 +25,7 @@ def quaternion_from_euler(roll, pitch, yaw):
     return [w, x, y, z]
 
 def connect_to_sitl():
-    connection_string = "udp:127.0.0.1:14550"
+    connection_string = "udp:127.0.0.1:15550"
     print("Connecting to SITL via UDP on", connection_string)
     master = mavutil.mavlink_connection(connection_string)
     master.wait_heartbeat()
