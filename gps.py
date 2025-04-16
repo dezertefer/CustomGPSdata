@@ -70,16 +70,19 @@ def get_gps_position(master, timeout=1):
 
 def quantize_position(lat, lon):
     """
-    Quantize the position to simulate low precision (approx. 500 m resolution).
-    Latitude is quantized in steps of ~500 m (~0.0045°).
-    Longitude is quantized based on the cosine of the latitude.
+    Simulate low precision (about 500 m resolution) by adding a random offset.
+    Instead of neat rounding, we add random errors so that each GPS fix "jumps."
+    For latitude, the step is about 500 m (~0.0045°).
+    For longitude, the step is scaled by cos(latitude).
     """
-    lat_step = 500 / 111000.0   # about 0.0045°
+    lat_step = 500 / 111000.0  # ~0.0045°
     cos_lat = math.cos(math.radians(lat))
     lon_step = 500 / (111000.0 * cos_lat) if cos_lat != 0 else 0.005
-    q_lat = round(lat / lat_step) * lat_step
-    q_lon = round(lon / lon_step) * lon_step
-    return q_lat, q_lon
+
+    # Random offset in the range [-step/2, +step/2]:
+    noisy_lat = lat + random.uniform(-lat_step/2, lat_step/2)
+    noisy_lon = lon + random.uniform(-lon_step/2, lon_step/2)
+    return noisy_lat, noisy_lon
 
 def haversine_distance(lat1, lon1, lat2, lon2):
     """
