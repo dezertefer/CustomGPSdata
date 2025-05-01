@@ -6,7 +6,7 @@ target_pos  = None
 mav_master  = None
 start_time  = time.monotonic()
 
-async def handle_current(ws, path):
+async def handle_current(ws):
     global current_pos
     print("🛰 Current‐pos handler ready")
     try:
@@ -22,7 +22,7 @@ async def handle_current(ws, path):
     finally:
         print("🛰 Current handler exit")
 
-async def handle_target(ws, path):
+async def handle_target(ws):
     global target_pos
     print("🎯 Target‐pos handler ready")
     try:
