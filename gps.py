@@ -72,22 +72,41 @@ def compute_bearing(lat1, lon1, lat2, lon2):
 
 
 async def control_loop():
-    commanded_yaw = 0.0
-    last_update   = time.time()
+    commanded_yaw   = 0.0
+    last_update     = time.time()
+    arrival_thresh  = 300    # metres – adjust for your noise level
+    arrived         = False
+
     while True:
+        if arrived:
+            # keep hovering: zero pitch, same yaw, thrust ≈ hover
+            send_attitude_target(0, 0, commanded_yaw, thrust=0.5)
+            await asyncio.sleep(0.5)
+            continue
+
+        # normal forward-motion command (5° forward pitch)
         send_attitude_target(0, -math.radians(5), commanded_yaw)
-        if time.time() - last_update > 3.0 and current_pos and target_pos:
+
+        # guidance update every 3 s
+        if time.time() - last_update >= 3.0 and current_pos and target_pos:
             last_update = time.time()
-            try:
-                lat1, lon1 = current_pos['lat'], current_pos['lon']
-                lat2, lon2 = target_pos ['lat'], target_pos ['lon']
-                dist = math.hypot(lat2-lat1, lon2-lon1)*111000
-                yaw  = compute_bearing(lat1, lon1, lat2, lon2)
-                print(f"→ Δ={dist:.0f}m, yaw={math.degrees(yaw):.1f}°")
-                commanded_yaw = yaw
-            except Exception:
-                print("‼️ Exception in guidance update:")
-                traceback.print_exc()
+
+            lat1, lon1 = current_pos['lat'], current_pos['lon']
+            lat2, lon2 = target_pos ['lat'], target_pos ['lon']
+            dlat, dlon = lat2 - lat1, lon2 - lon1
+            dist       = math.hypot(dlat, dlon) * 111000  # rough metres
+
+            print(f"[{time.strftime('%X')}] distance ≈ {dist:.0f} m")
+
+            if dist < arrival_thresh:
+                print(f"🎉 Arrived (< {arrival_thresh} m). Hovering.")
+                arrived = True
+                continue
+
+            # update heading toward target
+            commanded_yaw = compute_bearing(lat1, lon1, lat2, lon2)
+            print(f"→ new heading {math.degrees(commanded_yaw):.1f}°")
+
         await asyncio.sleep(0.2)
 
 async def main():
