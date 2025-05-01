@@ -19,7 +19,7 @@ WAYPOINTS = [
     (-35.3552028, 149.2211129),
 ]
 
-SPEED = 2.6            # m/s ground-speed
+SPEED = 9.5            # m/s ground-speed
 SEND_INTERVAL = 1.0    # seconds between fixes
 NOISE_RADIUS = 250     # metres (half of 500 m “grid”)
 
