@@ -38,14 +38,38 @@ async def handle_target(ws, path):
     finally:
         print("🎯 Target handler exit")
 
-def quaternion_from_euler(r, p, y):
-    # … your conversion …
+def quaternion_from_euler(roll, pitch, yaw):
+    cy, sy = math.cos(yaw/2), math.sin(yaw/2)
+    cp, sp = math.cos(pitch/2), math.sin(pitch/2)
+    cr, sr = math.cos(roll/2),    math.sin(roll/2)
+    return [
+        cr*cp*cy + sr*sp*sy,
+        sr*cp*cy - cr*sp*sy,
+        cr*sp*cy + sr*cp*sy,
+        cr*cp*sy - sr*sp*cy
+    ]
 
-def send_attitude_target(r, p, y, thrust=0.5):
-    # … your MAVLink …
+def send_attitude_target(roll, pitch, yaw, thrust=0.5):
+    t_ms = int((time.monotonic() - start_time) * 1000)
+    q    = quaternion_from_euler(roll, pitch, yaw)
+    mav_master.mav.set_attitude_target_send(
+        t_ms,
+        mav_master.target_system,
+        mav_master.target_component,
+        0,      # type_mask = 0 → use all fields (including thrust)
+        q, 0,0,0,
+        thrust
+    )
+    print(f"→ Att cmd: pitch={pitch:.3f}, yaw={math.degrees(yaw):.1f}°, thrust={thrust}")
 
 def compute_bearing(lat1, lon1, lat2, lon2):
-    # … your bearing …
+    dLon = math.radians(lon2 - lon1)
+    φ1, φ2 = math.radians(lat1), math.radians(lat2)
+    x = math.sin(dLon)*math.cos(φ2)
+    y = math.cos(φ1)*math.sin(φ2) - math.sin(φ1)*math.cos(φ2)*math.cos(dLon)
+    bearing = math.atan2(x, y)
+    return bearing if bearing >= 0 else bearing + 2*math.pi
+
 
 async def control_loop():
     commanded_yaw = 0.0
