@@ -1,182 +1,117 @@
 #!/usr/bin/env python3
-from pymavlink import mavutil
+import asyncio
+import websockets
+import json
 import time
 import math
+from pymavlink import mavutil
 
-# Global start time for time_boot_ms calculation.
-start_time = time.monotonic()
+# globals for async handlers
+current_pos = None
+target_pos  = None
+mav_master  = None
+start_time  = time.monotonic()
+
+async def handle_current(ws, path):
+    global current_pos
+    print("🛰 Current‐pos client connected")
+    try:
+        async for msg in ws:
+            current_pos = json.loads(msg)
+            print(f"[{time.strftime('%X')}] Current ← {current_pos}")
+    except websockets.exceptions.ConnectionClosed:
+        print("🛰 Current‐pos client disconnected")
+
+async def handle_target(ws, path):
+    global target_pos
+    print("🎯 Target‐pos client connected")
+    try:
+        async for msg in ws:
+            target_pos = json.loads(msg)
+            print(f"[{time.strftime('%X')}] Target ← {target_pos}")
+    except websockets.exceptions.ConnectionClosed:
+        print("🎯 Target‐pos client disconnected")
 
 def quaternion_from_euler(roll, pitch, yaw):
-    """
-    Convert Euler angles (in radians) to quaternion.
-    Returns a list: [w, x, y, z]
-    """
-    cy = math.cos(yaw * 0.5)
-    sy = math.sin(yaw * 0.5)
-    cp = math.cos(pitch * 0.5)
-    sp = math.sin(pitch * 0.5)
-    cr = math.cos(roll * 0.5)
-    sr = math.sin(roll * 0.5)
-
-    w = cr * cp * cy + sr * sp * sy
-    x = sr * cp * cy - cr * sp * sy
-    y = cr * sp * cy + sr * cp * sy
-    z = cr * cp * sy - sr * sp * cy
+    cy, sy = math.cos(yaw/2), math.sin(yaw/2)
+    cp, sp = math.cos(pitch/2), math.sin(pitch/2)
+    cr, sr = math.cos(roll/2),    math.sin(roll/2)
+    w = cr*cp*cy + sr*sp*sy
+    x = sr*cp*cy - cr*sp*sy
+    y = cr*sp*cy + sr*cp*sy
+    z = cr*cp*sy - sr*sp*cy
     return [w, x, y, z]
 
-def connect_to_sitl():
-    connection_string = "udp:127.0.0.1:15550"
-    print("Connecting to SITL via UDP on", connection_string)
-    master = mavutil.mavlink_connection(connection_string)
-    master.wait_heartbeat()
-    print("Connected. Heartbeat from system (system %u, component %u)" %
-          (master.target_system, master.target_component))
-    return master
-
-def send_attitude_target(master, roll=0.0, pitch=0.0, yaw=0.0, thrust=0.5):
+def send_attitude_target(roll, pitch, yaw, thrust=0.5):
     """
-    Send a SET_ATTITUDE_TARGET message.
-    Uses type_mask=0 so that all fields (including thrust) are active.
-    Thrust of ~0.5 is assumed to maintain altitude.
+    Send SET_ATTITUDE_TARGET to mav_master.
+    small forward pitch → motion; thrust=0.5 for hover.
     """
     q = quaternion_from_euler(roll, pitch, yaw)
-    type_mask = 0  # do not ignore any parameters.
-    # Use elapsed time since the script started (in milliseconds).
-    time_boot_ms = int((time.monotonic() - start_time) * 1000)
-    
-    master.mav.set_attitude_target_send(
-        time_boot_ms,
-        master.target_system,
-        master.target_component,
+    type_mask = 0  # use all fields
+    t_ms = int((time.monotonic() - start_time) * 1000)
+    mav_master.mav.set_attitude_target_send(
+        t_ms,
+        mav_master.target_system,
+        mav_master.target_component,
         type_mask,
-        q,
-        0, 0, 0,  # body roll rate, pitch rate, yaw rate (not used)
+        q, 0, 0, 0,
         thrust
     )
-    print(f"Attitude cmd: roll=0, pitch={pitch:.3f}, yaw={yaw:.3f}, thrust={thrust:.3f}")
-
-def get_gps_position(master, timeout=1):
-    """
-    Wait for a GLOBAL_POSITION_INT message and extract latitude, longitude, altitude.
-    Returns values in degrees (lat, lon) and meters (alt).
-    """
-    msg = master.recv_match(type='GLOBAL_POSITION_INT', blocking=True, timeout=timeout)
-    if msg is None:
-        return None, None, None
-    lat = msg.lat / 1e7
-    lon = msg.lon / 1e7
-    alt = msg.alt / 1000.0  # Convert mm to m.
-    return lat, lon, alt
-
-def quantize_position(lat, lon):
-    """
-    Simulate low precision (about 500 m resolution) by adding a random offset.
-    Instead of neat rounding, we add random errors so that each GPS fix "jumps."
-    For latitude, the step is about 500 m (~0.0045°).
-    For longitude, the step is scaled by cos(latitude).
-    """
-    lat_step = 500 / 111000.0  # ~0.0045°
-    cos_lat = math.cos(math.radians(lat))
-    lon_step = 500 / (111000.0 * cos_lat) if cos_lat != 0 else 0.005
-
-    # Random offset in the range [-step/2, +step/2]:
-    noisy_lat = lat + random.uniform(-lat_step/2, lat_step/2)
-    noisy_lon = lon + random.uniform(-lon_step/2, lon_step/2)
-    return noisy_lat, noisy_lon
-
-def haversine_distance(lat1, lon1, lat2, lon2):
-    """
-    Compute the great-circle distance between two latitude/longitude points.
-    Returns distance in meters.
-    """
-    R = 6371000.0  # Earth radius in meters.
-    phi1 = math.radians(lat1)
-    phi2 = math.radians(lat2)
-    dphi = math.radians(lat2 - lat1)
-    dlambda = math.radians(lon2 - lon1)
-    a = math.sin(dphi/2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda/2)**2
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    return R * c
+    print(f"→ Att cmd: pitch={pitch:.3f}, yaw={math.degrees(yaw):.1f}°, thrust={thrust}")
 
 def compute_bearing(lat1, lon1, lat2, lon2):
-    """
-    Compute the bearing in radians from point 1 (lat1, lon1) to point 2 (lat2, lon2).
-    Bearing is normalized to 0–2π.
-    """
     dLon = math.radians(lon2 - lon1)
-    lat1_rad = math.radians(lat1)
-    lat2_rad = math.radians(lat2)
-    x = math.sin(dLon) * math.cos(lat2_rad)
-    y = math.cos(lat1_rad) * math.sin(lat2_rad) - math.sin(lat1_rad) * math.cos(lat2_rad) * math.cos(dLon)
+    φ1, φ2 = math.radians(lat1), math.radians(lat2)
+    x = math.sin(dLon)*math.cos(φ2)
+    y = math.cos(φ1)*math.sin(φ2) - math.sin(φ1)*math.cos(φ2)*math.cos(dLon)
     bearing = math.atan2(x, y)
-    if bearing < 0:
-        bearing += 2 * math.pi
-    return bearing
+    return bearing if bearing >= 0 else bearing + 2*math.pi
 
-def main():
-    master = connect_to_sitl()
-    
-    # Assume the aircraft is already airborne.
-    print("Switching to GUIDED_NOGPS mode")
-    master.set_mode("GUIDED_NOGPS")
-    
-    # Define the flight plan (box) as a series of waypoints.
-    # Order: Home point, then corner 2, corner 3, corner 4.
-    waypoints = [
-        (-35.363262, 149.165237),      # Home (starting point)
-        (-35.3187709, 149.1570670),
-        (-35.3110088, 149.2113521),
-        (-35.3552028, 149.2211129)
-    ]
-    
-    # Start at the first waypoint (Home).
-    current_target_index = 1   # Next target is the second point.
-    threshold_distance = 1000  # In meters; threshold distance for waypoint switch.
-    commanded_yaw = 0.0        # The commanded yaw (in radians).
-    
-    last_guidance_update = time.time()
-    
-    print("Entering main control loop (press Ctrl+C to exit)...")
-    try:
-        while True:
-            # Command forward motion using a slight forward pitch.
-            forward_pitch_deg = 35
-            forward_pitch_rad = -math.radians(forward_pitch_deg)  # negative pitch = forward motion.
-            send_attitude_target(master, roll=0.0, pitch=forward_pitch_rad, yaw=commanded_yaw, thrust=0.5)
-            
-            current_time = time.time()
-            # Update guidance every 3 seconds.
-            if current_time - last_guidance_update >= 3.0:
-                last_guidance_update = current_time
-                
-                gps_lat, gps_lon, gps_alt = get_gps_position(master, timeout=1)
-                if gps_lat is None:
-                    print("No GPS data received; skipping guidance update.")
-                else:
-                    # Quantize position to simulate 500-m resolution.
-                    q_lat, q_lon = quantize_position(gps_lat, gps_lon)
-                    print(f"Raw GPS: ({gps_lat:.6f}, {gps_lon:.6f}), Quantized: ({q_lat:.6f}, {q_lon:.6f}), Alt: {gps_alt:.1f} m")
-                    
-                    # Get current target waypoint.
-                    target_lat, target_lon = waypoints[current_target_index]
-                    
-                    # Compute distance to the current target.
-                    distance_to_wp = haversine_distance(q_lat, q_lon, target_lat, target_lon)
-                    print(f"Distance to waypoint {current_target_index}: {distance_to_wp:.1f} m")
-                    
-                    # If within threshold, switch to the next waypoint.
-                    if distance_to_wp < threshold_distance:
-                        print(f"Reached waypoint {current_target_index}. Switching to next waypoint.")
-                        current_target_index = (current_target_index + 1) % len(waypoints)
-                        target_lat, target_lon = waypoints[current_target_index]
-                    
-                    # Compute and update commanded yaw toward current target.
-                    commanded_yaw = compute_bearing(q_lat, q_lon, target_lat, target_lon)
-                    print(f"Updated commanded yaw: {math.degrees(commanded_yaw):.1f}° toward waypoint {current_target_index}")
-                    
-            time.sleep(0.2)
-    except KeyboardInterrupt:
-        print("Control loop interrupted. Exiting...")
+async def control_loop():
+    """
+    - Every 0.2s: send a small forward‐pitch attitude target using current commanded_yaw.
+    - Every 3s: recompute commanded_yaw = bearing(current→target).
+    """
+    commanded_yaw = 0.0
+    last_update   = time.time()
+    while True:
+        # always send forward‐motion command
+        pitch = -math.radians(5)  # negative = forward
+        send_attitude_target(0.0, pitch, commanded_yaw)
+
+        # recompute yaw every 3s
+        if time.time() - last_update >= 3.0:
+            last_update = time.time()
+            if current_pos and target_pos:
+                dlat = target_pos['lat'] - current_pos['lat']
+                dlon = target_pos['lon'] - current_pos['lon']
+                dist = math.hypot(dlat, dlon) * 111000  # rough meters
+                new_yaw = compute_bearing(
+                    current_pos['lat'], current_pos['lon'],
+                    target_pos ['lat'], target_pos ['lon']
+                )
+                print(f"[{time.strftime('%X')}] Δ={dist:.0f} m → yaw {math.degrees(new_yaw):.1f}°")
+                commanded_yaw = new_yaw
+
+        await asyncio.sleep(0.2)
+
+async def main():
+    global mav_master
+    # 1) connect to SITL
+    mav_master = mavutil.mavlink_connection("udp:127.0.0.1:14550")
+    mav_master.wait_heartbeat()
+    print("🎮 Connected to SITL (GUIDED_NOGPS)")
+    mav_master.set_mode("GUIDED_NOGPS")
+
+    # 2) start websocket servers
+    srv1 = websockets.serve(handle_current, 'localhost', 8765)
+    srv2 = websockets.serve(handle_target,  'localhost', 8766)
+    await asyncio.gather(srv1, srv2)
+    print("🚀 WS servers on 8765 (current) & 8766 (target)")
+
+    # 3) run control loop forever
+    await control_loop()
 
 if __name__ == '__main__':
-    main()
+    asyncio.run(main())
