@@ -111,7 +111,7 @@ async def control_loop():
 
 async def main():
     global mav_master
-    mav_master = mavutil.mavlink_connection("udp:127.0.0.1:14550")
+    mav_master = mavutil.mavlink_connection("udp:127.0.0.1:15550")
     mav_master.wait_heartbeat()
     mav_master.set_mode("GUIDED_NOGPS")
     await websockets.serve(handle_current, 'localhost', 8765)
