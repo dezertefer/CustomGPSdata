@@ -85,7 +85,7 @@ async def control_loop():
             continue
 
         # normal forward-motion command (5° forward pitch)
-        send_attitude_target(0, -math.radians(5), commanded_yaw)
+        send_attitude_target(0, -math.radians(20), commanded_yaw)
 
         # guidance update every 3 s
         if time.time() - last_update >= 3.0 and current_pos and target_pos:
