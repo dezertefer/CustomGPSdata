@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # drone_control_server.py
-import asyncio, websockets, json, time, math, traceback
+import asyncio, websockets, json, time, math, traceback, subprocess, os, sys
 from pymavlink import mavutil
 
 # ---------------------------------------------------------------------
@@ -135,19 +135,41 @@ async def control_loop():
 #  Program entry
 # ---------------------------------------------------------------------
 async def main():
-    global mav
-    # 1. connect to SITL
+    global mav, target_ws, current_pos, target_pos
+
+    # 1) Connect to SITL and wait for heartbeat
     mav = mavutil.mavlink_connection("udp:127.0.0.1:14550")
     mav.wait_heartbeat()
-    print("✅ MAVLink connected")
-    mav.set_mode("GUIDED_NOGPS")
+    print("✅ MAVLink heartbeat received. Waiting for GUIDED_NOGPS mode...")
 
-    # 2. start both WebSocket servers
+    # 2) Watch for manual mode switch to GUIDED_NOGPS
+    while True:
+        hb = mav.recv_match(type='HEARTBEAT', blocking=True, timeout=1)
+        if hb:
+            mode_str = mav.mode_mapping().get(hb.custom_mode)
+            if mode_str == "GUIDED_NOGPS":
+                print("🔄 Detected GUIDED_NOGPS — launching helpers.")
+                break
+        await asyncio.sleep(0.5)
+
+    # 3) Launch helper scripts from the same directory
+    script_dir   = os.path.dirname(os.path.abspath(__file__))
+    sim_script   = os.path.join(script_dir, "current_position_simulator_square.py")
+    tgt_script   = os.path.join(script_dir, "target_sender.py")
+
+    # Use the same Python interpreter
+    python_exec = sys.executable
+
+    sim_proc = subprocess.Popen([python_exec, sim_script])
+    tgt_proc = subprocess.Popen([python_exec, tgt_script])
+    print(f"👟 Launched simulator (PID {sim_proc.pid}) and target sender (PID {tgt_proc.pid}).")
+
+    # 4) Start both WebSocket servers
     await websockets.serve(handle_current, "0.0.0.0", 8765)
     await websockets.serve(handle_target,  "0.0.0.0", 8766)
-    print("🌐 listening on 8765 (/current) & 8766 (/target)")
+    print("🌐 WebSocket servers running on 8765 (/current) & 8766 (/target)")
 
-    # 3. run control loop forever
+    # 5) Enter the control loop
     await control_loop()
 
 if __name__ == "__main__":
