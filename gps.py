@@ -8,13 +8,13 @@ import traceback
 from pymavlink import mavutil
 
 # ── CONFIG ────────────────────────────────────────────────────────────────
-MAVLINK_URI    = "udp:127.0.0.1:15550"   # the port mavlink-router forwards to
-DATASTREAM_HZ  = 2                       # how often to ask for all streams
+MAVLINK_URI   = "udp:127.0.0.1:15550"
+DATASTREAM_HZ = 2    # Hz for DATA_STREAM_ALL
 
 # ── WebSocket state ───────────────────────────────────────────────────────
 current_pos = None    # {'lat':…, 'lon':…, 'declination':…}
 target_pos  = None    # {'lat':…, 'lon':…, 'declination':…}
-target_ws   = None    # so we can ACK back {"reached":true}
+target_ws   = None    # so we can send back {"reached": true}
 
 # ── MAVLink helpers ───────────────────────────────────────────────────────
 START_TIME = time.monotonic()
@@ -38,7 +38,7 @@ def send_attitude_target(pitch_rad, yaw_rad, thrust=0.5):
         t_ms,
         mav.target_system,
         mav.target_component,
-        0,      # type_mask
+        0,    # type_mask = use roll/pitch/yaw & thrust
         q, 0, 0, 0,
         thrust
     )
@@ -103,27 +103,26 @@ async def handle_target(ws):
 
 # ── Control loop ──────────────────────────────────────────────────────────
 async def control_loop():
-    arrival_thresh = 300       # metres
+    arrival_thresh = 300
     forward_pitch  = -math.radians(30)
     commanded_yaw  = 0.0
     last_update    = time.time()
 
     while True:
-        # 1) Watch for mode flips
+        # 1) check for mode flips
         hb = mav.recv_match(type='HEARTBEAT', blocking=False)
         if hb:
-            print(f"[{time.strftime('%X')}] raw custom_mode → {hb.custom_mode!r}")
-            mode_str = mav.mode_mapping().get(hb.custom_mode)
-            print(f"[{time.strftime('%X')}] decoded mode      → {mode_str}")
+            mode_str = mavutil.mode_string_v10(hb)
+            print(f"[{time.strftime('%X')}] Mode → {mode_str}")
             if mode_str != "GUIDED_NOGPS":
-                print("⚠️  Mode left GUIDED_NOGPS; exiting loop.")
+                print("⚠️  Mode changed; exiting control loop.")
                 return
 
-        # 2) Send attitude every 0.2 s
+        # 2) send attitude every 0.2s
         send_attitude_target(forward_pitch, commanded_yaw)
         await asyncio.sleep(0.2)
 
-        # 3) Guidance every 3 s
+        # 3) guidance every 3s
         if time.time() - last_update < 3.0 or not (current_pos and target_pos):
             continue
         last_update = time.time()
@@ -150,45 +149,46 @@ async def control_loop():
 async def main():
     global mav
 
-    # 1) connect to SITL via mavlink-router port
+    # connect and wait for heartbeat
     mav = mavutil.mavlink_connection(MAVLINK_URI)
     mav.wait_heartbeat()
     print(f"✅ Heartbeat received on {MAVLINK_URI}")
 
-    # 2) request full data-stream so mode_mapping() gets populated
+    # request full data stream
     mav.mav.request_data_stream_send(
         mav.target_system,
         mav.target_component,
         mavutil.mavlink.MAV_DATA_STREAM_ALL,
-        DATASTREAM_HZ, 1
+        DATASTREAM_HZ,
+        1
     )
     print(f"→ Requested DATA_STREAM_ALL @ {DATASTREAM_HZ} Hz")
 
-    # 3) spin up WS servers immediately
+    # start WebSocket servers right away
     print("🌐 Starting WebSocket servers…")
     curr_srv = await websockets.serve(handle_current, "0.0.0.0", 8765)
     tgt_srv  = await websockets.serve(handle_target,  "0.0.0.0", 8766)
     print("✅ WebSocket servers up on 8765 (/current) & 8766 (/target)")
 
-    # 4) wait until user flips into GUIDED_NOGPS
+    # wait for GUIDED_NOGPS
     print("⏳ Awaiting GUIDED_NOGPS mode…")
     while True:
         hb = mav.recv_match(type='HEARTBEAT', blocking=True, timeout=1)
         if hb:
-            mode_str = mav.mode_mapping().get(hb.custom_mode)
+            mode_str = mavutil.mode_string_v10(hb)
             print(f"[{time.strftime('%X')}] startup mode → {mode_str}")
             if mode_str == "GUIDED_NOGPS":
                 print("🔄 Entering control loop.")
                 break
         await asyncio.sleep(0.5)
 
-    # 5) run control loop (exits when mode changes)
+    # run loop (exits when mode changes)
     await control_loop()
 
-    # 6) cleanup
+    # cleanup
     print("👋 Shutting down WebSocket servers.")
-    curr_srv.close();  tgt_srv.close()
-    await curr_srv.wait_closed();  await tgt_srv.wait_closed()
+    curr_srv.close(); tgt_srv.close()
+    await curr_srv.wait_closed(); await tgt_srv.wait_closed()
 
 if __name__ == "__main__":
     asyncio.run(main())
