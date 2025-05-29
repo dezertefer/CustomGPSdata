@@ -3,7 +3,7 @@ import time
 from pymavlink import mavutil
 
 def main():
-    mav = mavutil.mavlink_connection("udp:127.0.0.1:14550")
+    mav = mavutil.mavlink_connection("udp:127.0.0.1:15550")
     mav.wait_heartbeat()
     print("✅ Heartbeat OK, waiting for GUIDED_NOGPS…")
 
