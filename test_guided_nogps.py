@@ -2,39 +2,34 @@
 import time
 from pymavlink import mavutil
 
-# ─── EDIT THIS LIST TO WATCH FOR MODES YOU WANT TO TEST ──────────────
-TARGET_MODES = {
-    "STABILIZE",
-    "ALT_HOLD",
-    "LOITER",
-    "GUIDED",
-    "GUIDED_NOGPS",
-    "AUTO",
-    "RTL",
-}
-# ──────────────────────────────────────────────────────────────────────
-
 def main():
-    mav = mavutil.mavlink_connection("udp:127.0.0.1:15550")
+    # 1) Connect and log
+    sitl_addr = "udp:127.0.0.1:15550"
+    print(f"→ Connecting to SITL on {sitl_addr}")
+    mav = mavutil.mavlink_connection(sitl_addr)
+    print("→ Waiting for heartbeat…")
     mav.wait_heartbeat()
-    print("✅ Heartbeat OK. Watching for modes:", ", ".join(sorted(TARGET_MODES)))
+    print(f"✅ Connected (sys={mav.target_system} comp={mav.target_component})")
+
+    # 2) Ask the autopilot to stream all data at 2 Hz
+    mav.mav.request_data_stream_send(
+        mav.target_system,
+        mav.target_component,
+        mavutil.mavlink.MAV_DATA_STREAM_ALL,
+        2,    # 2 Hz
+        1     # start
+    )
+    print("→ Requested DATA_STREAM_ALL @2 Hz")
+
+    # 3) Poll for HEARTBEATs and print any mode changes
     last_mode = None
-
     while True:
-        hb = mav.recv_match(type="HEARTBEAT", blocking=True, timeout=1)
-        if not hb:
-            continue
-
-        # get human‐readable mode string
-        mode_str = mavutil.mode_string_v10(hb)
-
-        # only print on change to reduce spam
-        if mode_str != last_mode:
-            print(f"[{time.strftime('%X')}] Mode changed → {mode_str}")
-            if mode_str in TARGET_MODES:
-                print(f"✔️  Detected target mode: {mode_str}")
-            last_mode = mode_str
-
+        hb = mav.recv_match(type="HEARTBEAT", blocking=False)
+        if hb:
+            mode_str = mavutil.mode_string_v10(hb)
+            if mode_str != last_mode:
+                print(f"[{time.strftime('%X')}] Mode → {mode_str}")
+                last_mode = mode_str
         time.sleep(0.2)
 
 if __name__ == "__main__":
