@@ -7,16 +7,16 @@ import math
 import traceback
 from pymavlink import mavutil
 
-# ── CONFIG ────────────────────────────────────────────────────────────────
+# Config
 MAVLINK_URI   = "udp:127.0.0.1:15550"
-DATASTREAM_HZ = 2    # Hz for DATA_STREAM_ALL
+DATASTREAM_HZ = 2
 
-# ── WebSocket state ───────────────────────────────────────────────────────
-current_pos = None    # {'lat':…, 'lon':…, 'declination':…}
-target_pos  = None    # {'lat':…, 'lon':…, 'declination':…}
-target_ws   = None    # so we can send back {"reached": true}
+# WebSocket state
+current_pos = None
+target_pos  = None
+target_ws   = None
 
-# ── MAVLink helpers ───────────────────────────────────────────────────────
+# MAVLink state
 START_TIME = time.monotonic()
 mav = None
 
@@ -38,7 +38,7 @@ def send_attitude_target(pitch_rad, yaw_rad, thrust=0.5):
         t_ms,
         mav.target_system,
         mav.target_component,
-        0,    # type_mask = use roll/pitch/yaw & thrust
+        0,
         q, 0, 0, 0,
         thrust
     )
@@ -59,7 +59,6 @@ def bearing(lat1, lon1, lat2, lon2):
     brng = math.atan2(x, y)
     return brng if brng >= 0 else brng + 2*math.pi
 
-# ── WebSocket handlers ────────────────────────────────────────────────────
 async def handle_current(ws):
     print("🛰  /current connected")
     global current_pos
@@ -101,7 +100,6 @@ async def handle_target(ws):
         target_ws = None
         print("🎯 /target disconnected")
 
-# ── Control loop ──────────────────────────────────────────────────────────
 async def control_loop():
     arrival_thresh = 300
     forward_pitch  = -math.radians(30)
@@ -114,8 +112,8 @@ async def control_loop():
         if hb:
             mode_str = mavutil.mode_string_v10(hb)
             print(f"[{time.strftime('%X')}] Mode → {mode_str}")
-            if mode_str != "GUIDED_NOGPS":
-                print("⚠️  Mode changed; exiting control loop.")
+            if mode_str and mode_str != "GUIDED_NOGPS" and not mode_str.startswith("Mode("):
+                print("⚠️  Named mode changed; exiting control loop.")
                 return
 
         # 2) send attitude every 0.2s
@@ -145,16 +143,13 @@ async def control_loop():
             )
             forward_pitch = -math.radians(5)
 
-# ── Entry point ───────────────────────────────────────────────────────────
 async def main():
     global mav
 
-    # connect and wait for heartbeat
     mav = mavutil.mavlink_connection(MAVLINK_URI)
     mav.wait_heartbeat()
     print(f"✅ Heartbeat received on {MAVLINK_URI}")
 
-    # request full data stream
     mav.mav.request_data_stream_send(
         mav.target_system,
         mav.target_component,
@@ -164,13 +159,11 @@ async def main():
     )
     print(f"→ Requested DATA_STREAM_ALL @ {DATASTREAM_HZ} Hz")
 
-    # start WebSocket servers right away
     print("🌐 Starting WebSocket servers…")
     curr_srv = await websockets.serve(handle_current, "0.0.0.0", 8765)
     tgt_srv  = await websockets.serve(handle_target,  "0.0.0.0", 8766)
     print("✅ WebSocket servers up on 8765 (/current) & 8766 (/target)")
 
-    # wait for GUIDED_NOGPS
     print("⏳ Awaiting GUIDED_NOGPS mode…")
     while True:
         hb = mav.recv_match(type='HEARTBEAT', blocking=True, timeout=1)
@@ -182,10 +175,8 @@ async def main():
                 break
         await asyncio.sleep(0.5)
 
-    # run loop (exits when mode changes)
     await control_loop()
 
-    # cleanup
     print("👋 Shutting down WebSocket servers.")
     curr_srv.close(); tgt_srv.close()
     await curr_srv.wait_closed(); await tgt_srv.wait_closed()
