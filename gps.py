@@ -7,18 +7,18 @@ import math
 import traceback
 from pymavlink import mavutil
 
-# ---------------------------------------------------------------------
-#  WebSocket state
-# ---------------------------------------------------------------------
-current_pos = None          # {'lat': …, 'lon': …, 'declination': …}
-target_pos  = None          # {'lat': …, 'lon': …, 'declination': …}
-target_ws   = None          # websocket connection (to send ACK)
+# ── CONFIG ────────────────────────────────────────────────────────────────
+# Change this if your mavlink-router is forwarding to a different port:
+MAVLINK_URI = "udp:127.0.0.1:15550"
 
-# ---------------------------------------------------------------------
-#  MAVLink helpers
-# ---------------------------------------------------------------------
+# ── WebSocket state ───────────────────────────────────────────────────────
+current_pos = None    # {'lat':…, 'lon':…, 'declination':…}
+target_pos  = None    # {'lat':…, 'lon':…, 'declination':…}
+target_ws   = None    # the websocket to send back {"reached":true}
+
+# ── MAVLink helpers ───────────────────────────────────────────────────────
 START_TIME = time.monotonic()
-mav = None                  # will hold our MAVLink connection
+mav = None            # will hold our mavlink_connection()
 
 def quaternion_from_euler(r, p, y):
     cy, sy = math.cos(y/2), math.sin(y/2)
@@ -55,17 +55,14 @@ def bearing(lat1, lon1, lat2, lon2):
     dλ = math.radians(lon2 - lon1)
     φ1, φ2 = map(math.radians, (lat1, lat2))
     x = math.sin(dλ) * math.cos(φ2)
-    y = math.cos(φ1) * math.sin(φ2) - math.sin(φ1) * math.cos(φ2) * math.cos(dλ)
+    y = math.cos(φ1) * math.sin(φ2) - math.sin(φ1)*math.cos(φ2)*math.cos(dλ)
     brng = math.atan2(x, y)
     return brng if brng >= 0 else brng + 2*math.pi
 
-# ---------------------------------------------------------------------
-#  WebSocket handlers
-# ---------------------------------------------------------------------
+# ── WebSocket handlers ────────────────────────────────────────────────────
 async def handle_current(ws):
-    """Receives {"latitude":.., "longitude":.., "declination":..} from simulator."""
+    print("🛰 /current connected")
     global current_pos
-    print("🛰  /current connected")
     try:
         async for msg in ws:
             try:
@@ -76,20 +73,16 @@ async def handle_current(ws):
                     'declination': data.get('declination')
                 }
             except (json.JSONDecodeError, KeyError):
-                print("❌ bad JSON from /current; expected latitude & longitude")
+                print("❌ bad JSON on /current (need latitude & longitude)")
     except Exception:
         traceback.print_exc()
     finally:
-        print("🛰  /current disconnected")
+        print("🛰 /current disconnected")
 
 async def handle_target(ws):
-    """
-    Receives {"latitude":.., "longitude":.., "declination":..} for the next waypoint.
-    Sends back {"reached": true} on the same socket when within threshold.
-    """
+    print("🎯 /target connected")
     global target_pos, target_ws
     target_ws = ws
-    print("🎯 /target connected")
     try:
         async for msg in ws:
             try:
@@ -101,36 +94,35 @@ async def handle_target(ws):
                 }
                 print("🎯 new target:", target_pos)
             except (json.JSONDecodeError, KeyError):
-                print("❌ bad JSON from /target; expected latitude & longitude")
+                print("❌ bad JSON on /target (need latitude & longitude)")
     except Exception:
         traceback.print_exc()
     finally:
         target_ws = None
         print("🎯 /target disconnected")
 
-# ---------------------------------------------------------------------
-#  Main control loop
-# ---------------------------------------------------------------------
+# ── Control loop ──────────────────────────────────────────────────────────
 async def control_loop():
-    arrival_thresh = 300         # metres “close enough”
-    forward_pitch  = -math.radians(30)   # ~2.6 m/s
+    arrival_thresh = 300         # metres
+    forward_pitch  = -math.radians(30)
     commanded_yaw  = 0.0
     last_update    = time.time()
 
     while True:
-        # 1) Check for mode change
+        # 1) Always watch for mode flips
         hb = mav.recv_match(type='HEARTBEAT', blocking=False)
         if hb:
             mode_str = mav.mode_mapping().get(hb.custom_mode)
+            print(f"[{time.strftime('%X')}] Mode → {mode_str}")
             if mode_str != "GUIDED_NOGPS":
-                print(f"⚠️ Mode changed to {mode_str}, exiting control loop.")
-                return  # exit back to main
+                print("⚠️ Mode changed away from GUIDED_NOGPS — exiting control loop.")
+                return
 
         # 2) Send attitude every 0.2 s
         send_attitude_target(forward_pitch, commanded_yaw)
         await asyncio.sleep(0.2)
 
-        # 3) Guidance logic every 3 s
+        # 3) Guidance every 3 s
         if time.time() - last_update < 3.0 or not (current_pos and target_pos):
             continue
         last_update = time.time()
@@ -145,45 +137,50 @@ async def control_loop():
             print("✅ reached target (≤300 m)")
             if target_ws:
                 await target_ws.send(json.dumps({"reached": True}))
-            forward_pitch = 0  # hover until new target
+            forward_pitch = 0.0
         else:
-            # recompute heading
             commanded_yaw = bearing(
                 current_pos['lat'], current_pos['lon'],
                 target_pos ['lat'], target_pos ['lon']
             )
             forward_pitch = -math.radians(5)
 
-# ---------------------------------------------------------------------
-#  Program entry
-# ---------------------------------------------------------------------
+# ── Entry point ───────────────────────────────────────────────────────────
 async def main():
     global mav
 
-    # 1) Connect to SITL and wait for heartbeat
-    mav = mavutil.mavlink_connection("udp:127.0.0.1:15550")
+    # 1) Connect to SITL via the port that mavlink-router forwards to us:
+    mav = mavutil.mavlink_connection(MAVLINK_URI)
     mav.wait_heartbeat()
-    print("✅ Heartbeat received. Waiting for GUIDED_NOGPS mode…")
+    print(f"✅ Heartbeat received on {MAVLINK_URI}")
 
-    # 2) Block until GUIDED_NOGPS
+    # 2) Start WebSocket servers right away
+    print("🌐 Starting WebSocket servers on 8765 (/current) & 8766 (/target)…")
+    curr_srv = await websockets.serve(handle_current, "0.0.0.0", 8765)
+    tgt_srv  = await websockets.serve(handle_target,  "0.0.0.0", 8766)
+    print("✅ WebSocket servers running — your web-client can connect now")
+
+    # 3) Wait until someone flips into GUIDED_NOGPS
+    print("⏳ Waiting for mode → GUIDED_NOGPS…")
     while True:
         hb = mav.recv_match(type='HEARTBEAT', blocking=True, timeout=1)
         if hb:
             mode_str = mav.mode_mapping().get(hb.custom_mode)
+            print(f"[{time.strftime('%X')}] Mode → {mode_str}")
             if mode_str == "GUIDED_NOGPS":
-                print("🔄 Detected GUIDED_NOGPS — starting control servers.")
+                print("🔄 Detected GUIDED_NOGPS — entering control loop.")
                 break
         await asyncio.sleep(0.5)
 
-    # 3) Start WebSocket servers
-    await websockets.serve(handle_current, "0.0.0.0", 8765)
-    await websockets.serve(handle_target,  "0.0.0.0", 8766)
-    print("🌐 WebSocket servers running on 8765 (/current) & 8766 (/target)")
-
-    # 4) Enter the control loop
+    # 4) Run the loop (will exit if mode changes away)
     await control_loop()
 
-    print("👋 Control loop exited; shutting down.")
+    # 5) Clean up
+    print("👋 Control loop ended; shutting down WebSocket servers.")
+    curr_srv.close()
+    tgt_srv .close()
+    await curr_srv.wait_closed()
+    await tgt_srv .wait_closed()
 
 if __name__ == "__main__":
     asyncio.run(main())
