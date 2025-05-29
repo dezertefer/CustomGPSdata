@@ -111,7 +111,7 @@ async def control_loop():
         hb = mav.recv_match(type='HEARTBEAT', blocking=False)
         if hb:
             mode_str = mavutil.mode_string_v10(hb)
-            print(f"[{time.strftime('%X')}] Mode → {mode_str}")
+            #print(f"[{time.strftime('%X')}] Mode → {mode_str}")
             if mode_str and mode_str != "GUIDED_NOGPS" and not mode_str.startswith("Mode("):
                 print("⚠️  Named mode changed; exiting control loop.")
                 return
