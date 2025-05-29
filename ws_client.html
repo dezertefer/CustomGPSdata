@@ -4,47 +4,57 @@
 <meta charset="utf-8">
 <title>GPS WebSocket Tester</title>
 <style>
-    body{font-family:sans-serif;max-width:640px;margin:auto;padding:1rem}
-    fieldset{margin:1rem 0;padding:.8rem}
-    legend{font-weight:bold}
-    label{display:block;margin:.25rem 0}
-    input[type=text]{width:12rem}
-    .status{margin:.5rem 0;font-weight:bold}
-    button{margin-top:.4rem}
+  body{font-family:sans-serif;max-width:640px;margin:auto;padding:1rem}
+  fieldset{margin:1rem 0;padding:.8rem}
+  legend{font-weight:bold}
+  label{display:block;margin:.35rem 0}
+  input[type=text]{width:14rem}
+  .status{margin:.5rem 0;font-weight:bold}
+  button{margin-top:.4rem}
 </style>
 </head>
 <body>
 <h1>GPS WebSocket Tester</h1>
 
-<!-- Connection ----------------------------------------------------------------->
+<!-- Connection -->
 <fieldset>
   <legend>Server connection</legend>
-  <label>Server IP (or host):
+  <label>Server IP / host:
     <input id="ip" type="text" value="127.0.0.1">
   </label>
-  <button id="btnConnect" onclick="connectSockets()">Connect</button>
+  <button onclick="connectSockets()">Connect</button>
   <button onclick="disconnectSockets()">Disconnect</button>
   <div class="status" id="statusCur">🛰 /current: not connected</div>
   <div class="status" id="statusTgt">🎯 /target: not connected</div>
 </fieldset>
 
-<!-- /current sender ------------------------------------------------------------->
+<!-- /current sender -->
 <fieldset>
   <legend>Send /current (drone position)</legend>
-  <label>Latitude  <input id="curLat"  type="text" value="39.4321748"></label>
-  <label>Longitude <input id="curLon"  type="text" value="-76.6313836"></label>
-  <label>Declination (°, optional)
-         <input id="curDec" type="text" placeholder="null"></label>
+  <label>Latitude
+    <input id="curLat"  type="text" value="39.4321748">
+  </label>
+  <label>Longitude
+    <input id="curLon"  type="text" value="-76.6313836">
+  </label>
+  <label>Declination (° optional)
+    <input id="curDec"  type="text" placeholder="null">
+  </label>
   <button onclick="sendCurrent()">Send /current</button>
 </fieldset>
 
-<!-- /target sender ------------------------------------------------------------->
+<!-- /target sender -->
 <fieldset>
   <legend>Send /target (way-point)</legend>
-  <label>Latitude  <input id="tgtLat"  type="text" value="39.43290"></label>
-  <label>Longitude <input id="tgtLon"  type="text" value="-76.63210"></label>
-  <label>Declination (°, optional)
-         <input id="tgtDec" type="text" placeholder="null"></label>
+  <label>Latitude
+    <input id="tgtLat"  type="text" value="39.43290">
+  </label>
+  <label>Longitude
+    <input id="tgtLon"  type="text" value="-76.63210">
+  </label>
+  <label>Declination (° optional)
+    <input id="tgtDec"  type="text" placeholder="null">
+  </label>
   <button onclick="sendTarget()">Send /target</button>
 </fieldset>
 
@@ -56,37 +66,36 @@ function connectSockets(){
   if(!ip){alert('Enter server IP / host');return;}
 
   wsCur = new WebSocket(`ws://${ip}:8765`);
+  wsCur.onopen  =()=> setStatus('Cur','✅ connected');
+  wsCur.onclose =()=> setStatus('Cur','🔌 disconnected');
+  wsCur.onerror =()=> setStatus('Cur','❌ error');
+
   wsTgt = new WebSocket(`ws://${ip}:8766`);
-
-  wsCur.onopen   = ()=> status('Cur','✅ connected');
-  wsCur.onclose  = ()=> status('Cur','🔌 disconnected');
-  wsCur.onerror  = ()=> status('Cur','❌ error');
-
-  wsTgt.onopen   = ()=> status('Tgt','✅ connected');
-  wsTgt.onclose  = ()=> status('Tgt','🔌 disconnected');
-  wsTgt.onerror  = ()=> status('Tgt','❌ error');
+  wsTgt.onopen  =()=> setStatus('Tgt','✅ connected');
+  wsTgt.onclose =()=> setStatus('Tgt','🔌 disconnected');
+  wsTgt.onerror =()=> setStatus('Tgt','❌ error');
 }
 
 function disconnectSockets(){
-  if(wsCur){wsCur.close(); wsCur=null;}
-  if(wsTgt){wsTgt.close(); wsTgt=null;}
+  if(wsCur){wsCur.close();wsCur=null;}
+  if(wsTgt){wsTgt.close();wsTgt=null;}
 }
 
-function status(which,msg){
-  const el = document.getElementById(which==='Cur'?'statusCur':'statusTgt');
-  el.textContent = (which==='Cur'?'🛰 ':'🎯 ')+
-                   (which==='Cur'?'/current: ':'/target: ')+msg;
+function setStatus(which,msg){
+  const el=document.getElementById(which==='Cur'?'statusCur':'statusTgt');
+  el.textContent=(which==='Cur'?'🛰 /current: ':'🎯 /target: ')+msg;
 }
 
 function sendCurrent(){
-  if(!isOpen(wsCur)){alert('🛰 /current not connected');return;}
-  const payload = buildPayload('cur');
+  if(!open(wsCur)){alert('🛰 /current not connected');return;}
+  const payload=buildPayload('cur');
   wsCur.send(JSON.stringify(payload));
   alert('Sent /current:\n'+JSON.stringify(payload,null,2));
 }
+
 function sendTarget(){
-  if(!isOpen(wsTgt)){alert('🎯 /target not connected');return;}
-  const payload = buildPayload('tgt');
+  if(!open(wsTgt)){alert('🎯 /target not connected');return;}
+  const payload=buildPayload('tgt');
   wsTgt.send(JSON.stringify(payload));
   alert('Sent /target:\n'+JSON.stringify(payload,null,2));
 }
@@ -98,8 +107,8 @@ function buildPayload(prefix){
   dec = dec?parseFloat(dec):null;
   return {latitude:lat, longitude:lon, declination:dec};
 }
-const isOpen = ws => ws && ws.readyState === WebSocket.OPEN;
+
+const open = ws => ws && ws.readyState === WebSocket.OPEN;
 </script>
 </body>
 </html>
-
