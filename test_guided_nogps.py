@@ -4,7 +4,7 @@ from pymavlink import mavutil
 
 def main():
     # 1) Connect to SITL on UDP 14550 and wait for heartbeat
-    mav = mavutil.mavlink_connection("udp:127.0.0.1:14550")
+    mav = mavutil.mavlink_connection("udp:127.0.0.1:15550")
     mav.wait_heartbeat()
     print("✅ Heartbeat received. Waiting for GUIDED_NOGPS...")
 
