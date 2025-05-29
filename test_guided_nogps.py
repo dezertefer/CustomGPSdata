@@ -4,7 +4,7 @@ from pymavlink import mavutil
 
 def main():
     # 1) Connect and log
-    sitl_addr = "udp:127.0.0.1:15550"
+    sitl_addr = "tcp:127.0.0.1:5760"
     print(f"→ Connecting to SITL on {sitl_addr}")
     mav = mavutil.mavlink_connection(sitl_addr)
     print("→ Waiting for heartbeat…")
