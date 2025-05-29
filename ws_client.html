@@ -1,88 +1,104 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="UTF-8">
-  <title>WebSocket GPS Test</title>
-  <style>
-    body {
-      font-family: sans-serif;
-      padding: 1em;
-      max-width: 600px;
-    }
-    label, input, button {
-      margin: 0.3em 0;
-      display: block;
-    }
-    .status {
-      margin-top: 1em;
-      font-weight: bold;
-    }
-  </style>
+<meta charset="utf-8">
+<title>GPS WebSocket Tester</title>
+<style>
+    body{font-family:sans-serif;max-width:640px;margin:auto;padding:1rem}
+    fieldset{margin:1rem 0;padding:.8rem}
+    legend{font-weight:bold}
+    label{display:block;margin:.25rem 0}
+    input[type=text]{width:12rem}
+    .status{margin:.5rem 0;font-weight:bold}
+    button{margin-top:.4rem}
+</style>
 </head>
 <body>
-  <h1>WebSocket GPS Test</h1>
+<h1>GPS WebSocket Tester</h1>
 
-  <label>
-    Server IP:
-    <input id="ip" type="text" value="127.0.0.1" />
+<!-- Connection ----------------------------------------------------------------->
+<fieldset>
+  <legend>Server connection</legend>
+  <label>Server IP (or host):
+    <input id="ip" type="text" value="127.0.0.1">
   </label>
-  <button onclick="connectAll()">Connect</button>
+  <button id="btnConnect" onclick="connectSockets()">Connect</button>
+  <button onclick="disconnectSockets()">Disconnect</button>
+  <div class="status" id="statusCur">🛰 /current: not connected</div>
+  <div class="status" id="statusTgt">🎯 /target: not connected</div>
+</fieldset>
 
-  <div class="status" id="status-current">🛰 /current: not connected</div>
-  <div class="status" id="status-target">🎯 /target: not connected</div>
+<!-- /current sender ------------------------------------------------------------->
+<fieldset>
+  <legend>Send /current (drone position)</legend>
+  <label>Latitude  <input id="curLat"  type="text" value="39.4321748"></label>
+  <label>Longitude <input id="curLon"  type="text" value="-76.6313836"></label>
+  <label>Declination (°, optional)
+         <input id="curDec" type="text" placeholder="null"></label>
+  <button onclick="sendCurrent()">Send /current</button>
+</fieldset>
 
-  <button onclick="sendCurrent()">Send Test /current</button>
-  <button onclick="sendTarget()">Send Test /target</button>
+<!-- /target sender ------------------------------------------------------------->
+<fieldset>
+  <legend>Send /target (way-point)</legend>
+  <label>Latitude  <input id="tgtLat"  type="text" value="39.43290"></label>
+  <label>Longitude <input id="tgtLon"  type="text" value="-76.63210"></label>
+  <label>Declination (°, optional)
+         <input id="tgtDec" type="text" placeholder="null"></label>
+  <button onclick="sendTarget()">Send /target</button>
+</fieldset>
 
-  <script>
-    let wsCurrent = null;
-    let wsTarget = null;
+<script>
+let wsCur=null, wsTgt=null;
 
-    function connectAll() {
-      const ip = document.getElementById("ip").value;
+function connectSockets(){
+  const ip=document.getElementById('ip').value.trim();
+  if(!ip){alert('Enter server IP / host');return;}
 
-      wsCurrent = new WebSocket(`ws://${ip}:8765`);
-      wsCurrent.onopen = () =>
-        document.getElementById("status-current").innerText = "🛰 /current: ✅ connected";
-      wsCurrent.onerror = () =>
-        document.getElementById("status-current").innerText = "🛰 /current: ❌ error";
-      wsCurrent.onclose = () =>
-        document.getElementById("status-current").innerText = "🛰 /current: 🔌 disconnected";
+  wsCur = new WebSocket(`ws://${ip}:8765`);
+  wsTgt = new WebSocket(`ws://${ip}:8766`);
 
-      wsTarget = new WebSocket(`ws://${ip}:8766`);
-      wsTarget.onopen = () =>
-        document.getElementById("status-target").innerText = "🎯 /target: ✅ connected";
-      wsTarget.onerror = () =>
-        document.getElementById("status-target").innerText = "🎯 /target: ❌ error";
-      wsTarget.onclose = () =>
-        document.getElementById("status-target").innerText = "🎯 /target: 🔌 disconnected";
-    }
+  wsCur.onopen   = ()=> status('Cur','✅ connected');
+  wsCur.onclose  = ()=> status('Cur','🔌 disconnected');
+  wsCur.onerror  = ()=> status('Cur','❌ error');
 
-    function sendCurrent() {
-      if (wsCurrent && wsCurrent.readyState === WebSocket.OPEN) {
-        wsCurrent.send(JSON.stringify({
-          latitude: 39.43217480068108,
-          longitude: -76.63138368215046,
-          declination: null
-        }));
-        alert("✅ /current test data sent");
-      } else {
-        alert("🛰 /current not connected!");
-      }
-    }
+  wsTgt.onopen   = ()=> status('Tgt','✅ connected');
+  wsTgt.onclose  = ()=> status('Tgt','🔌 disconnected');
+  wsTgt.onerror  = ()=> status('Tgt','❌ error');
+}
 
-    function sendTarget() {
-      if (wsTarget && wsTarget.readyState === WebSocket.OPEN) {
-        wsTarget.send(JSON.stringify({
-          latitude: 39.43290000000000,
-          longitude: -76.63210000000000,
-          declination: null
-        }));
-        alert("✅ /target test data sent");
-      } else {
-        alert("🎯 /target not connected!");
-      }
-    }
-  </script>
+function disconnectSockets(){
+  if(wsCur){wsCur.close(); wsCur=null;}
+  if(wsTgt){wsTgt.close(); wsTgt=null;}
+}
+
+function status(which,msg){
+  const el = document.getElementById(which==='Cur'?'statusCur':'statusTgt');
+  el.textContent = (which==='Cur'?'🛰 ':'🎯 ')+
+                   (which==='Cur'?'/current: ':'/target: ')+msg;
+}
+
+function sendCurrent(){
+  if(!isOpen(wsCur)){alert('🛰 /current not connected');return;}
+  const payload = buildPayload('cur');
+  wsCur.send(JSON.stringify(payload));
+  alert('Sent /current:\n'+JSON.stringify(payload,null,2));
+}
+function sendTarget(){
+  if(!isOpen(wsTgt)){alert('🎯 /target not connected');return;}
+  const payload = buildPayload('tgt');
+  wsTgt.send(JSON.stringify(payload));
+  alert('Sent /target:\n'+JSON.stringify(payload,null,2));
+}
+
+function buildPayload(prefix){
+  const lat=parseFloat(document.getElementById(prefix+'Lat').value);
+  const lon=parseFloat(document.getElementById(prefix+'Lon').value);
+  let dec=document.getElementById(prefix+'Dec').value.trim();
+  dec = dec?parseFloat(dec):null;
+  return {latitude:lat, longitude:lon, declination:dec};
+}
+const isOpen = ws => ws && ws.readyState === WebSocket.OPEN;
+</script>
 </body>
 </html>
