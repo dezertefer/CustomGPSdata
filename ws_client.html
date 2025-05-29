@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Drone WebSocket Client</title>
+</head>
+<body>
+  <h1>Drone WebSocket Client</h1>
+
+  <section>
+    <h2>Current Position (&nbsp;ws://localhost:8765&nbsp;)</h2>
+    <button id="connectCurrent">Connect</button>
+    <button id="disconnectCurrent">Disconnect</button><br/>
+    Latitude:  <input id="currLat"  type="number" step="0.000001" value="39.4321748"/>
+    Longitude: <input id="currLon"  type="number" step="0.000001" value="-76.6313837"/>
+    Declination:<input id="currDecl" type="text"               value="null"/>
+    <button id="sendCurrent">Send Current</button>
+    <p id="currStatus">Status: disconnected</p>
+  </section>
+
+  <section>
+    <h2>Target Position (&nbsp;ws://localhost:8766&nbsp;)</h2>
+    <button id="connectTarget">Connect</button>
+    <button id="disconnectTarget">Disconnect</button><br/>
+    Latitude:  <input id="tgtLat"  type="number" step="0.000001" value="39.3187709"/>
+    Longitude: <input id="tgtLon"  type="number" step="0.000001" value="-76.1570670"/>
+    Declination:<input id="tgtDecl" type="text"               value="null"/>
+    <button id="sendTarget">Send Target</button>
+    <p id="tgtStatus">Status: disconnected</p>
+    <p id="tgtLog"></p>
+  </section>
+
+  <script>
+    let currSocket = null;
+    let tgtSocket  = null;
+
+    // ── Current Position Socket ─────────────────────────────────────────────
+    document.getElementById('connectCurrent').onclick = () => {
+      if (currSocket && currSocket.readyState === WebSocket.OPEN) return;
+      currSocket = new WebSocket('ws://localhost:8765');
+      currSocket.onopen    = () => document.getElementById('currStatus').innerText = 'Status: connected';
+      currSocket.onclose   = () => document.getElementById('currStatus').innerText = 'Status: disconnected';
+      currSocket.onerror   = e => console.error('Current socket error', e);
+    };
+    document.getElementById('disconnectCurrent').onclick = () => {
+      if (currSocket) currSocket.close();
+    };
+    document.getElementById('sendCurrent').onclick = () => {
+      if (!currSocket || currSocket.readyState !== WebSocket.OPEN) {
+        return alert('Current socket not open');
+      }
+      const msg = {
+        latitude:  parseFloat(document.getElementById('currLat').value),
+        longitude: parseFloat(document.getElementById('currLon').value),
+        declination: document.getElementById('currDecl').value || null
+      };
+      currSocket.send(JSON.stringify(msg));
+    };
+
+    // ── Target Position Socket ──────────────────────────────────────────────
+    document.getElementById('connectTarget').onclick = () => {
+      if (tgtSocket && tgtSocket.readyState === WebSocket.OPEN) return;
+      tgtSocket = new WebSocket('ws://localhost:8766');
+      tgtSocket.onopen    = () => document.getElementById('tgtStatus').innerText = 'Status: connected';
+      tgtSocket.onclose   = () => document.getElementById('tgtStatus').innerText = 'Status: disconnected';
+      tgtSocket.onerror   = e => console.error('Target socket error', e);
+      tgtSocket.onmessage = e => {
+        const log = document.getElementById('tgtLog');
+        log.innerText = '⏎ Received: ' + e.data;
+      };
+    };
+    document.getElementById('disconnectTarget').onclick = () => {
+      if (tgtSocket) tgtSocket.close();
+    };
+    document.getElementById('sendTarget').onclick = () => {
+      if (!tgtSocket || tgtSocket.readyState !== WebSocket.OPEN) {
+        return alert('Target socket not open');
+      }
+      const msg = {
+        latitude:  parseFloat(document.getElementById('tgtLat').value),
+        longitude: parseFloat(document.getElementById('tgtLon').value),
+        declination: document.getElementById('tgtDecl').value || null
+      };
+      tgtSocket.send(JSON.stringify(msg));
+    };
+  </script>
+</body>
+</html>
