@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # gps.py  –  attitude-only guidance while in GUIDED_NOGPS
 #
-# • Web-Socket servers (8765 / 8766) start first and stay up, so a browser can
-#   connect at any time.
+# • Web-socket servers (8765 / 8766) start first and stay up, so a browser
+#   can connect at any time.
 # • While GUIDED_NOGPS is active the script pitches forward only when BOTH
 #   feeds are present and we’re still outside ARRIVAL_THRESH_M.
-# • As soon as the FC leaves GUIDED_NOGPS the script stops sending *any*
-#   commands and waits for the next GUIDED_NOGPS entry.
+# • As soon as the FCU leaves GUIDED_NOGPS we stop sending *any* commands
+#   and wait for the next GUIDED_NOGPS entry.
 
 import asyncio, json, math, time, websockets
 from   pymavlink import mavutil
@@ -57,7 +57,7 @@ def bearing(lat1, lon1, lat2, lon2):
     b = math.atan2(x, y)
     return b if b >= 0 else b + 2*math.pi
 
-# ───────── Web-Socket handlers ─────────
+# ───────── Web-socket handlers ─────────
 async def handle_current(ws):
     global current_pos
     print("🛰  /current connected")
@@ -89,7 +89,8 @@ async def guided_loop():
     """Runs only while we remain in GUIDED_NOGPS."""
     arrived = False
     while True:
-        hb = mav.recv_match(type='HEARTBEAT', blocking=False)
+        hb = mav.recv_match(type='HEARTBEAT', blocking=False,
+                            condition=lambda m: m.get_srcComponent() == 1)
         if hb and not is_guided_nogps(hb):
             print(f"🚫 Mode changed → {mavutil.mode_string_v10(hb)}")
             return                    # stop sending anything
@@ -120,7 +121,7 @@ async def main():
     # 1) Web-socket servers first
     await websockets.serve(handle_current, "0.0.0.0", 8765)
     await websockets.serve(handle_target,  "0.0.0.0", 8766)
-    print("🌐 Web-Sockets up on 8765 (/current) & 8766 (/target)")
+    print("🌐 Web-sockets up on 8765 (/current) & 8766 (/target)")
 
     # 2) Connect to SITL
     print(f"→ Connecting to SITL on {SITL_URL}")
@@ -133,11 +134,12 @@ async def main():
         mavutil.mavlink.MAV_DATA_STREAM_ALL, STREAM_HZ, 1)
     print(f"→ Requested DATA_STREAM_ALL @ {STREAM_HZ} Hz")
 
-    # 3) Wait–run–wait loop
+    # 3) wait-run-wait loop
     while True:
         print("⏳ Awaiting GUIDED_NOGPS …")
         while True:
-            hb = mav.recv_match(type='HEARTBEAT', blocking=False)
+            hb = mav.recv_match(type='HEARTBEAT', blocking=False,
+                                condition=lambda m: m.get_srcComponent() == 1)
             if hb and is_guided_nogps(hb):
                 print("▶ GUIDED_NOGPS detected – control loop starts")
                 break
