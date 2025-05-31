@@ -2,34 +2,50 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>GPS WebSocket Tester</title>
+<title>GPS WebSocket Tester&nbsp;+ VOR passthrough</title>
 <style>
-  body{font-family:sans-serif;max-width:640px;margin:auto;padding:1rem}
-  fieldset{margin:1rem 0;padding:.8rem}
-  legend{font-weight:bold}
-  label{display:block;margin:.35rem 0}
+  body        {font-family:sans-serif;max-width:640px;margin:auto;padding:1rem}
+  fieldset    {margin:1rem 0;padding:.8rem}
+  legend      {font-weight:bold}
+  label       {display:block;margin:.35rem 0}
   input[type=text]{width:14rem}
-  .status{margin:.5rem 0;font-weight:bold}
-  button{margin-top:.4rem}
+  .status     {margin:.5rem 0;font-weight:bold}
+  button      {margin-top:.4rem}
+  .disabled   {opacity:.45;pointer-events:none}
 </style>
 </head>
 <body>
 <h1>GPS WebSocket Tester</h1>
 
-<!-- Connection -->
+<!-- ❶ Connection section -->
 <fieldset>
   <legend>Server connection</legend>
   <label>Server IP / host:
     <input id="ip" type="text" value="127.0.0.1">
   </label>
+
+  <label>
+    <input id="useVor" type="checkbox" onchange="updateVorUI()">
+    Use external VOR Web-Socket
+  </label>
+
+  <!-- VOR controls are hidden unless checkbox is ticked -->
+  <div id="vorBlock" style="display:none;margin-top:.6rem">
+    <label>VOR Web-Socket URL:
+      <input id="vorUrl" type="text" value="ws://localhost:9000">
+    </label>
+    <div class="status" id="statusVor">🛰 VOR: not connected</div>
+  </div>
+
   <button onclick="connectSockets()">Connect</button>
   <button onclick="disconnectSockets()">Disconnect</button>
+
   <div class="status" id="statusCur">🛰 /current: not connected</div>
   <div class="status" id="statusTgt">🎯 /target: not connected</div>
 </fieldset>
 
-<!-- /current sender -->
-<fieldset>
+<!-- ❷ /current sender -->
+<fieldset id="curField">
   <legend>Send /current (drone position)</legend>
   <label>Latitude
     <input id="curLat"  type="text" value="39.4321748">
@@ -43,7 +59,7 @@
   <button onclick="sendCurrent()">Send /current</button>
 </fieldset>
 
-<!-- /target sender -->
+<!-- ❸ /target sender -->
 <fieldset>
   <legend>Send /target (way-point)</legend>
   <label>Latitude
@@ -59,56 +75,93 @@
 </fieldset>
 
 <script>
-let wsCur=null, wsTgt=null;
+let wsCur=null, wsTgt=null, wsVor=null;
 
+/* ─── UI helpers ───────────────────────────────────────────── */
+function setStatus(idPrefix, msg){
+  const el = document.getElementById(
+    idPrefix === 'Cur' ? 'statusCur' :
+    idPrefix === 'Tgt' ? 'statusTgt' :
+    'statusVor'
+  );
+  el.textContent =
+    (idPrefix==='Cur'?'🛰 /current: ':
+     idPrefix==='Tgt'?'🎯 /target: ':
+     '🛰 VOR: ') + msg;
+}
+
+function updateVorUI(){
+  const useVor = document.getElementById('useVor').checked;
+  document.getElementById('vorBlock').style.display = useVor ? 'block' : 'none';
+
+  // grey-out /current sender while VOR is active
+  const curFs = document.getElementById('curField');
+  if(useVor){ curFs.classList.add('disabled'); }
+  else       { curFs.classList.remove('disabled'); }
+}
+
+/* ─── Connection management ───────────────────────────────── */
 function connectSockets(){
-  const ip=document.getElementById('ip').value.trim();
-  if(!ip){alert('Enter server IP / host');return;}
+  const host = document.getElementById('ip').value.trim();
+  if(!host){ return alert('Enter server IP / host'); }
 
-  wsCur = new WebSocket(`ws://${ip}:8765`);
-  wsCur.onopen  =()=> setStatus('Cur','✅ connected');
-  wsCur.onclose =()=> setStatus('Cur','🔌 disconnected');
-  wsCur.onerror =()=> setStatus('Cur','❌ error');
+  // ❶  connect to gps.py sockets
+  wsCur = new WebSocket(`ws://${host}:8765`);
+  wsCur.onopen  = ()=>setStatus('Cur','✅ connected');
+  wsCur.onclose = ()=>setStatus('Cur','🔌 disconnected');
+  wsCur.onerror = ()=>setStatus('Cur','❌ error');
 
-  wsTgt = new WebSocket(`ws://${ip}:8766`);
-  wsTgt.onopen  =()=> setStatus('Tgt','✅ connected');
-  wsTgt.onclose =()=> setStatus('Tgt','🔌 disconnected');
-  wsTgt.onerror =()=> setStatus('Tgt','❌ error');
+  wsTgt = new WebSocket(`ws://${host}:8766`);
+  wsTgt.onopen  = ()=>setStatus('Tgt','✅ connected');
+  wsTgt.onclose = ()=>setStatus('Tgt','🔌 disconnected');
+  wsTgt.onerror = ()=>setStatus('Tgt','❌ error');
+
+  // ❷  optionally connect to external VOR stream
+  if(document.getElementById('useVor').checked){
+    const vorUrl = document.getElementById('vorUrl').value.trim();
+    if(!vorUrl){ alert('Enter VOR Web-Socket URL'); return; }
+
+    wsVor = new WebSocket(vorUrl);
+    wsVor.onopen  = ()=>setStatus('Vor','✅ connected');
+    wsVor.onclose = ()=>setStatus('Vor','🔌 disconnected');
+    wsVor.onerror = ()=>setStatus('Vor','❌ error');
+
+    // Passthrough: every VOR message → /current socket
+    wsVor.onmessage = e=>{
+      if(open(wsCur)){ wsCur.send(e.data); }
+    };
+  }
 }
 
 function disconnectSockets(){
-  if(wsCur){wsCur.close();wsCur=null;}
-  if(wsTgt){wsTgt.close();wsTgt=null;}
+  [wsCur, wsTgt, wsVor].forEach(ws=>{ if(ws){ ws.close(); } });
+  wsCur=wsTgt=wsVor=null;
 }
 
-function setStatus(which,msg){
-  const el=document.getElementById(which==='Cur'?'statusCur':'statusTgt');
-  el.textContent=(which==='Cur'?'🛰 /current: ':'🎯 /target: ')+msg;
-}
+const open = ws => ws && ws.readyState === WebSocket.OPEN;
 
+/* ─── manual /current & /target senders ───────────────────── */
 function sendCurrent(){
-  if(!open(wsCur)){alert('🛰 /current not connected');return;}
-  const payload=buildPayload('cur');
+  if(!open(wsCur)){ return alert('🛰 /current not connected'); }
+  const payload = buildPayload('cur');
   wsCur.send(JSON.stringify(payload));
   alert('Sent /current:\n'+JSON.stringify(payload,null,2));
 }
 
 function sendTarget(){
-  if(!open(wsTgt)){alert('🎯 /target not connected');return;}
-  const payload=buildPayload('tgt');
+  if(!open(wsTgt)){ return alert('🎯 /target not connected'); }
+  const payload = buildPayload('tgt');
   wsTgt.send(JSON.stringify(payload));
   alert('Sent /target:\n'+JSON.stringify(payload,null,2));
 }
 
 function buildPayload(prefix){
-  const lat=parseFloat(document.getElementById(prefix+'Lat').value);
-  const lon=parseFloat(document.getElementById(prefix+'Lon').value);
-  let dec=document.getElementById(prefix+'Dec').value.trim();
-  dec = dec?parseFloat(dec):null;
+  const lat = parseFloat(document.getElementById(prefix+'Lat').value);
+  const lon = parseFloat(document.getElementById(prefix+'Lon').value);
+  let   dec = document.getElementById(prefix+'Dec').value.trim();
+  dec = dec ? parseFloat(dec) : null;
   return {latitude:lat, longitude:lon, declination:dec};
 }
-
-const open = ws => ws && ws.readyState === WebSocket.OPEN;
 </script>
 </body>
 </html>
