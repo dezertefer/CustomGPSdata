@@ -39,3 +39,50 @@ sudo python3 -m pip install --break-system-packages empy==3.3.4 future python-da
 Tip:
 the first full build is long; afterwards you may add --skip-build
 to sim_vehicle.py so the service launches instantly.
+
+3. Python virtual-env for gps.py
+python3 -m venv ~/venv-ardupilot
+source ~/venv-ardupilot/bin/activate
+pip install --upgrade pip
+pip install pymavlink websockets
+deactivate
+
+4. Install Mavlink-Router
+
+# 1) prerequisites ────────────────────────────────────────────────
+sudo apt update
+sudo apt install -y \
+      git meson ninja-build pkg-config gcc g++ \
+      systemd libsystemd-dev libglib2.0-dev libdbus-1-dev zlib1g-dev
+
+# 2) get the source ───────────────────────────────────────────────
+cd ~
+git clone https://github.com/mavlink-router/mavlink-router.git
+cd mavlink-router
+git submodule update --init --recursive
+
+# 3) configure & compile ──────────────────────────────────────────
+meson setup build .
+ninja -C build          # -j$(nproc) is implied
+
+# 4) install system-wide (to /usr/local) ──────────────────────────
+sudo ninja -C build install
+sudo ldconfig           # refresh shared-library cache
+
+# 5) create a systemd service (optional) ──────────────────────────
+sudo tee /etc/systemd/system/mavlink-router.service >/dev/null <<'EOF'
+[Unit]
+Description=MAVLink Router
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/mavlink-routerd --syslog
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now mavlink-router
