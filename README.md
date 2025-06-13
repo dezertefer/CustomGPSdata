@@ -29,7 +29,10 @@ git submodule update --init --recursive
 # shell needs to pick up new env vars
 exec $SHELL
 
-# 2-C.  One-off build (quad-copter firmware)
+# 2-C. Install the most critical dependencies separately
+sudo python3 -m pip install --break-system-packages empy==3.3.4 future python-dateutil
+
+# 2-D.  One-off build (quad-copter firmware)
 ./waf configure --board sitl
 ./waf copter  -j$(nproc)
 
