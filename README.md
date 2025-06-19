@@ -36,6 +36,40 @@ sudo python3 -m pip install --break-system-packages empy==3.3.4 future python-da
 ./waf configure --board sitl
 ./waf copter  -j$(nproc)
 
+3. Create an Ardupilot sitl service
+
+# 3-A. Add service file
+sudo tee /etc/systemd/system/arducopter-sitl.service > /dev/null <<'EOF'
+[Unit]
+Description=ArduCopter SITL (headless, no MAVProxy)
+After=network.target
+
+[Service]
+# run as your normal user so log files, parameters, etc. land in /home/<user>
+User=cdc
+Group=cdc
+WorkingDirectory=/home/cdc/ardupilot      # path to your ArduPilot repo
+
+# ── launch sim_vehicle.py ───────────────────────────────────────────────
+#  -v ArduCopter      : build/launch the Copter firmware
+#  -f quad            : 4-rotor quad-frame
+#  --out ...:14550    : stream MAVLink to 0.0.0.0:14550 (mavlink-router listens here)
+#  --no-mavproxy      : don’t spawn MAVProxy
+ExecStart=/home/cdc/venv-ardupilot/bin/python3 \
+          /home/cdc/ardupilot/Tools/autotest/sim_vehicle.py \
+          -v ArduCopter -f quad \
+          --out=0.0.0.0:14550 \
+          --no-mavproxy
+
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 Tip:
 the first full build is long; afterwards you may add --skip-build
 to sim_vehicle.py so the service launches instantly.
@@ -63,26 +97,41 @@ git submodule update --init --recursive
 
 # 3) configure & compile ──────────────────────────────────────────
 meson setup build .
-ninja -C build          # -j$(nproc) is implied
-
-# 4) install system-wide (to /usr/local) ──────────────────────────
 sudo ninja -C build install
-sudo ldconfig           # refresh shared-library cache
 
-# 5) create a systemd service (optional) ──────────────────────────
-sudo tee /etc/systemd/system/mavlink-router.service >/dev/null <<'EOF'
-[Unit]
-Description=MAVLink Router
-After=network.target
+# 4) create main.conf for mavlink-router app
 
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/mavlink-routerd --syslog
-Restart=on-failure
+sudo mkdir -p /etc/mavlink-router
 
-[Install]
-WantedBy=multi-user.target
+sudo tee /etc/mavlink-router/main.conf >/dev/null <<'EOF'
+[General]
+# Disable the built-in TCP server (so SITL can bind 5760 itself)
+TcpServerPort=0
+ReportStats=false
+MavlinkDialect=common
+
+[UdpEndpoint SITL]
+Mode    = Server
+Address = 127.0.0.1
+Port    = 14550
+
+[UdpEndpoint GPS_PY]
+Mode    = Normal
+Address = 127.0.0.1
+Port    = 15550
+
+[UdpEndpoint GroundStation]
+Mode    = Normal
+Address = 192.168.195.175
+Port    = 16550
+
+[TcpEndpoint SITL_TCP]
+Mode      = Normal
+Address   = 127.0.0.1
+Port      = 5760
+Reconnect = True
 EOF
 
-sudo systemctl daemon-reload
-sudo systemctl enable --now mavlink-router
+Changing this command you can change IP of GCS or add more endpoints if needed!
+
+
