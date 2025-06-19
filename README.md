@@ -1,62 +1,76 @@
-0. Prepare the Pi (≈10 min)
+# Raspberry Pi head-less ArduPilot SITL + MAVLink-router + gps.py helper  
+_works with Pi OS Bookworm 64-bit, user **cdc**_
 
+---
+
+## 0  Prepare the Pi (~10 min)
+
+```bash
 sudo apt update && sudo apt full-upgrade -y
-sudo apt install -y git curl screen tmux \
-                    python3 python3-venv python3-pip \
-                    build-essential ccache g++ wget \
-                    pkg-config libtool autoconf \
-                    libxml2-dev libxslt1-dev zlib1g-dev
+sudo apt install -y git curl wget build-essential ccache g++ make                     python3 python3-venv python3-pip python3-pexpect                     pkg-config libtool autoconf meson ninja-build                     libxml2-dev libxslt1-dev zlib1g-dev                     libglib2.0-dev libdbus-1-dev libsystemd-dev
 sudo reboot
+```
 
-1. Clone your project
+---
 
+## 1  Clone the project (gps helper + test page)
+
+```bash
 cd $HOME
 git clone https://github.com/dezertefer/CustomGPSdata.git
+# gps.py is now at  ~/CustomGPSdata/gps.py
+```
 
-We will keep gps.py and the web/ test page exactly where the repo puts them:
-~/CustomGPSdata/…
+---
 
-2. Build ArduPilot SITL (one-time, ≈25 min on Pi 4)
-# 2-A.  Get the source
+## 2  Python virtual-env for **gps.py** and tooling
+
+```bash
+python3 -m venv ~/venv-ardupilot
+source ~/venv-ardupilot/bin/activate
+
+pip install --upgrade pip
+pip install pymavlink websockets empy==3.3.4 future python-dateutil
+
+deactivate          # re‑enter only when running gps.py
+```
+
+---
+
+## 3  Build ArduPilot SITL (one‑time, ~25 min on Pi 4)
+
+```bash
 cd $HOME
 git clone https://github.com/ArduPilot/ardupilot.git
 cd ardupilot
 git submodule update --init --recursive
 
-# 2-B.  Pull the official prerequisites script:
 ./Tools/environment_install/install-prereqs-ubuntu.sh -y
-# shell needs to pick up new env vars
-exec $SHELL
+exec $SHELL                        # reload env vars
 
-# 2-C. Install the most critical dependencies separately
-sudo python3 -m pip install --break-system-packages empy==3.3.4 future python-dateutil
-
-# 2-D.  One-off build (quad-copter firmware)
 ./waf configure --board sitl
-./waf copter  -j$(nproc)
+./waf copter -j$(nproc)            # first build ≈ 25 min
+```
 
-3. Create an Ardupilot sitl service
+Binary produced:  
+`~/ardupilot/build/sitl/bin/arducopter`
 
-# 3-A. Add service file
-sudo tee /etc/systemd/system/arducopter-sitl.service > /dev/null <<'EOF'                               
+---
+
+## 4  Systemd service — **arducopter-sitl**
+
+```bash
+sudo tee /etc/systemd/system/arducopter-sitl.service >/dev/null <<'EOF'
 [Unit]
 Description=ArduCopter SITL (headless, no MAVProxy)
 After=network.target
 
 [Service]
-# run as your normal user so log files, parameters, etc. land in /home/<user>
-User=home
-Group=home
+User=cdc
+Group=cdc
 WorkingDirectory=/home/cdc/ardupilot
-# path to your ArduPilot repo
 
-ExecStart=/home/cdc/venv-ardupilot/bin/python3  \
-          /home/cdc/ardupilot/Tools/autotest/sim_vehicle.py \
-          -v ArduCopter               \
-          -f quad                     \
-          --speedup 1                 \
-          -N --out=udp:127.0.0.1:14550   \
-          --no-mavproxy
+ExecStart=/home/cdc/venv-ardupilot/bin/python3           /home/cdc/ardupilot/Tools/autotest/sim_vehicle.py           -v ArduCopter -f quad           --speedup 1           -N --out=udp:127.0.0.1:14550           --no-mavproxy
 
 Restart=on-failure
 RestartSec=5
@@ -65,52 +79,32 @@ StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
-
 EOF
+```
 
-Tip:
-the first full build is long; afterwards you may add --skip-build
-to sim_vehicle.py so the service launches instantly.
+> **Tip**: after the first full build you may append `--skip-build` to `ExecStart`
+> so nightly restarts are instant.
 
-# activate the ArduPilot venv
-source /home/home/venv-ardupilot/bin/activate
+---
 
-# install pexpect (and, automatically, ptyprocess)
-pip install --no-cache-dir pexpect
-# you can leave the venv with:  deactivate
+## 5  Build & install **mavlink-router**
 
-3. Python virtual-env for gps.py
-python3 -m venv ~/venv-ardupilot
-source ~/venv-ardupilot/bin/activate
-pip install --upgrade pip
-pip install pymavlink websockets
-deactivate
-
-4. Install Mavlink-Router
-
-# 1) prerequisites ────────────────────────────────────────────────
-sudo apt update
-sudo apt install -y \
-      git meson ninja-build pkg-config gcc g++ \
-      systemd libsystemd-dev libglib2.0-dev libdbus-1-dev zlib1g-dev
-
-# 2) get the source ───────────────────────────────────────────────
-cd ~
+```bash
+cd $HOME
 git clone https://github.com/mavlink-router/mavlink-router.git
 cd mavlink-router
 git submodule update --init --recursive
 
-# 3) configure & compile ──────────────────────────────────────────
 meson setup build .
-sudo ninja -C build install
+sudo ninja -C build install          # installs /usr/bin/mavlink-routerd
+```
 
-# 4) create main.conf for mavlink-router app
+### 5‑A  `/etc/mavlink-router/main.conf`
 
+```bash
 sudo mkdir -p /etc/mavlink-router
-
 sudo tee /etc/mavlink-router/main.conf >/dev/null <<'EOF'
 [General]
-# Disable the built-in TCP server (so SITL can bind 5760 itself)
 TcpServerPort=0
 ReportStats=false
 MavlinkDialect=common
@@ -127,7 +121,7 @@ Port    = 15550
 
 [UdpEndpoint GroundStation]
 Mode    = Normal
-Address = 192.168.195.175
+Address = 192.168.195.175   # ← change to your GCS IP
 Port    = 16550
 
 [TcpEndpoint SITL_TCP]
@@ -136,7 +130,72 @@ Address   = 127.0.0.1
 Port      = 5760
 Reconnect = True
 EOF
+```
 
-Changing this command you can change IP of GCS or add more endpoints if needed!
+---
 
+## 6  Systemd service — **gps-drone** (`gps.py`)
 
+```bash
+sudo tee /etc/systemd/system/gps-drone.service >/dev/null <<'EOF'
+[Unit]
+Description=GUIDED_NOGPS attitude helper
+After=mavlink-router.service
+Wants=mavlink-router.service
+
+[Service]
+Type=simple
+User=cdc
+Group=cdc
+WorkingDirectory=/home/cdc/CustomGPSdata
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/cdc/venv-ardupilot/bin/python3 gps.py
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+```
+
+---
+
+## 7  Enable & start everything
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now arducopter-sitl.service
+sudo systemctl enable --now mavlink-router.service
+sudo systemctl enable --now gps-drone.service
+```
+
+Watch logs:
+
+```bash
+journalctl -u arducopter-sitl.service -f
+journalctl -u mavlink-router.service -f
+journalctl -u gps-drone.service   -f
+```
+
+---
+
+## 8  Quick test in a browser
+
+1. Open `~/CustomGPSdata/web/index.html`  
+   (or copy to your PC and set **Server IP** to the Pi’s address).
+2. Press **Connect** – both sockets show ✅.
+3. In Mission Planner hit **Ctrl‑G** to change to **GUIDED_NOGPS**.  
+   `gps.py` starts streaming `SET_ATTITUDE_TARGET`.
+
+---
+
+### Updating ArduPilot later
+
+```bash
+cd ~/ardupilot
+git pull && git submodule update --init --recursive
+./waf copter -j$(nproc)
+sudo systemctl restart arducopter-sitl
+```
+
+Enjoy your virtual flights! ✈️
