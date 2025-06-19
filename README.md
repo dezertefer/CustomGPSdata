@@ -47,11 +47,11 @@ After=network.target
 # run as your normal user so log files, parameters, etc. land in /home/<user>
 User=home
 Group=home
-WorkingDirectory=/home/home/ardupilot
+WorkingDirectory=/home/cdc/ardupilot
 # path to your ArduPilot repo
 
-ExecStart=/home/home/venv-ardupilot/bin/python3  \
-          /home/home/ardupilot/Tools/autotest/sim_vehicle.py \
+ExecStart=/home/cdc/venv-ardupilot/bin/python3  \
+          /home/cdc/ardupilot/Tools/autotest/sim_vehicle.py \
           -v ArduCopter               \
           -f quad                     \
           --speedup 1                 \
