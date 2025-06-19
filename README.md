@@ -121,7 +121,7 @@ Port    = 15550
 
 [UdpEndpoint GroundStation]
 Mode    = Normal
-Address = 192.168.195.175   # ← change to your GCS IP
+Address = 192.168.195.175
 Port    = 16550
 
 [TcpEndpoint SITL_TCP]
