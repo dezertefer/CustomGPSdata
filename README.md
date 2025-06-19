@@ -17,7 +17,6 @@ We will keep gps.py and the web/ test page exactly where the repo puts them:
 ~/CustomGPSdata/…
 
 2. Build ArduPilot SITL (one-time, ≈25 min on Pi 4)
-
 # 2-A.  Get the source
 cd $HOME
 git clone https://github.com/ArduPilot/ardupilot.git
@@ -73,6 +72,13 @@ EOF
 Tip:
 the first full build is long; afterwards you may add --skip-build
 to sim_vehicle.py so the service launches instantly.
+
+# activate the ArduPilot venv
+source /home/home/venv-ardupilot/bin/activate
+
+# install pexpect (and, automatically, ptyprocess)
+pip install --no-cache-dir pexpect
+# you can leave the venv with:  deactivate
 
 3. Python virtual-env for gps.py
 python3 -m venv ~/venv-ardupilot
