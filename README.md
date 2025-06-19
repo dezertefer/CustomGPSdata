@@ -48,6 +48,8 @@ git submodule update --init --recursive
 ./Tools/environment_install/install-prereqs-ubuntu.sh -y
 exec $SHELL                        # reload env vars
 
+pip install pexpect empy==3.3.4 --break-system-packages
+
 ./waf configure --board sitl
 ./waf copter -j$(nproc)            # first build ≈ 25 min
 ```
