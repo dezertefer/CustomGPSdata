@@ -181,21 +181,12 @@ journalctl -u gps-drone.service   -f
 
 ## 8  Quick test in a browser
 
-1. Open `~/CustomGPSdata/web/index.html`  
+1. Open `~/CustomGPSdata/ws_client.html`  
    (or copy to your PC and set **Server IP** to the Pi’s address).
 2. Press **Connect** – both sockets show ✅.
-3. In Mission Planner hit **Ctrl‑G** to change to **GUIDED_NOGPS**.  
+3. In Mission Planner change to **GUIDED_NOGPS**.  
    `gps.py` starts streaming `SET_ATTITUDE_TARGET`.
 
 ---
-
-### Updating ArduPilot later
-
-```bash
-cd ~/ardupilot
-git pull && git submodule update --init --recursive
-./waf copter -j$(nproc)
-sudo systemctl restart arducopter-sitl
-```
 
 Enjoy your virtual flights! ✈️
