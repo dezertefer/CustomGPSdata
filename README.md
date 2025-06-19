@@ -82,9 +82,6 @@ WantedBy=multi-user.target
 EOF
 ```
 
-> **Tip**: after the first full build you may append `--skip-build` to `ExecStart`
-> so nightly restarts are instant.
-
 ---
 
 ## 5  Build & install **mavlink-router**
