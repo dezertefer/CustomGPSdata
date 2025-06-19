@@ -38,26 +38,24 @@ sudo python3 -m pip install --break-system-packages empy==3.3.4 future python-da
 3. Create an Ardupilot sitl service
 
 # 3-A. Add service file
-sudo tee /etc/systemd/system/arducopter-sitl.service > /dev/null <<'EOF'
+sudo tee /etc/systemd/system/arducopter-sitl.service > /dev/null <<'EOF'                               
 [Unit]
 Description=ArduCopter SITL (headless, no MAVProxy)
 After=network.target
 
 [Service]
 # run as your normal user so log files, parameters, etc. land in /home/<user>
-User=cdc
-Group=cdc
-WorkingDirectory=/home/cdc/ardupilot      # path to your ArduPilot repo
+User=home
+Group=home
+WorkingDirectory=/home/home/ardupilot
+# path to your ArduPilot repo
 
-# ── launch sim_vehicle.py ───────────────────────────────────────────────
-#  -v ArduCopter      : build/launch the Copter firmware
-#  -f quad            : 4-rotor quad-frame
-#  --out ...:14550    : stream MAVLink to 0.0.0.0:14550 (mavlink-router listens here)
-#  --no-mavproxy      : don’t spawn MAVProxy
-ExecStart=/home/cdc/venv-ardupilot/bin/python3 \
-          /home/cdc/ardupilot/Tools/autotest/sim_vehicle.py \
-          -v ArduCopter -f quad \
-          --out=0.0.0.0:14550 \
+ExecStart=/home/home/venv-ardupilot/bin/python3  \
+          /home/home/ardupilot/Tools/autotest/sim_vehicle.py \
+          -v ArduCopter               \
+          -f quad                     \
+          --speedup 1                 \
+          -N --out=udp:127.0.0.1:14550   \
           --no-mavproxy
 
 Restart=on-failure
@@ -67,6 +65,7 @@ StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
+
 EOF
 
 Tip:
