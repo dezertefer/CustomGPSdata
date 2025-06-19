@@ -73,7 +73,7 @@ User=cdc
 Group=cdc
 WorkingDirectory=/home/cdc/ardupilot
 
-ExecStart=/home/cdc/venv-ardupilot/bin/python3           /home/cdc/ardupilot/Tools/autotest/sim_vehicle.py           -v ArduCopter -f quad           --speedup 1           -N --out=udp:127.0.0.1:14550           --no-mavproxy  --home=39.417790,-76.615905,35,0 
+ExecStart=/home/cdc/venv-ardupilot/bin/python3           /home/cdc/ardupilot/Tools/autotest/sim_vehicle.py           -v ArduCopter -f quad           --speedup 1           -N --out=udp:127.0.0.1:14550           --no-mavproxy  -l 39.417790,-76.615905,35,0 
 
 Restart=on-failure
 RestartSec=5
