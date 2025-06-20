@@ -45,13 +45,13 @@ cd ardupilot
 git submodule update --init --recursive
 
 ./Tools/environment_install/install-prereqs-ubuntu.sh -y
-exec $SHELL                        # reload env vars
+exec $SHELL                        
 
 pip install pexpect
 pip install empy==3.3.4 --break-system-packages
 
 ./waf configure --board sitl
-./waf copter -j$(nproc)            # first build ≈ 25 min
+./waf copter -j$(nproc)            
 ```
 
 Binary produced:  
