@@ -95,7 +95,7 @@ cd mavlink-router
 git submodule update --init --recursive
 
 meson setup build .
-sudo ninja -C build install          # installs /usr/bin/mavlink-routerd
+sudo ninja -C build install          
 ```
 
 ### 5‑A  `/etc/mavlink-router/main.conf`
