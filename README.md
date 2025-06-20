@@ -134,11 +134,11 @@ EOF
 ```
 
 This is the config of mavlink-router.
-General is configured to disable TCP with port 5760 of the mavlink router itself
-UDP endpoint sitl listens locally for SITL
-UDP endpoint gps_py connects to python app
-UDP endpoint ground station is the device we want to connect to the system for example Mission Planner
-TCP endpoint sitl is fall back in case UDP doesn't work
+General is configured to disable TCP with port 5760 of the mavlink router itself.
+UDP endpoint sitl listens locally for SITL.
+UDP endpoint gps_py connects to python app.
+UDP endpoint ground station is the device we want to connect to the system for example Mission Planner.
+TCP endpoint sitl is fall back in case UDP doesn't work.
 ---
 
 ## 6  Systemd service — **gps-drone** (`gps.py`)
