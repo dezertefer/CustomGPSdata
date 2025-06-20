@@ -1,6 +1,8 @@
 # Raspberry Pi head-less ArduPilot SITL + MAVLink-router + gps.py helper  
 _works with Pi OS Bookworm 64-bit, user **cdc**_
 
+RPI OS BookWorm 64bit
+
 ---
 
 ## 0  Prepare the Pi (~10 min)
