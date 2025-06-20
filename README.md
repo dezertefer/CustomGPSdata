@@ -18,7 +18,6 @@ sudo reboot
 ```bash
 cd $HOME
 git clone https://github.com/dezertefer/CustomGPSdata.git
-# gps.py is now at  ~/CustomGPSdata/gps.py
 ```
 
 ---
@@ -32,7 +31,7 @@ source ~/venv-ardupilot/bin/activate
 pip install --upgrade pip
 pip install pymavlink websockets empy==3.3.4 future python-dateutil
 
-deactivate          # re‑enter only when running gps.py
+deactivate
 ```
 
 ---
