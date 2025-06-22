@@ -13,7 +13,8 @@ from   pymavlink import mavutil
 SITL_URL          = "udp:127.0.0.1:15550"
 STREAM_HZ         = 2
 FWD_PITCH_RAD     = -math.radians(5)    # ≈ –5 °
-ARRIVAL_THRESH_M  = 300
+ARRIVAL_RADIUS_M_DEFAULT = 300         # ← rename & keep old value
+arrival_radius_m         = ARRIVAL_RADIUS_M_DEFAULT
 HEX_PREFIX        = "Mode("             # ignore opaque hex names
 # ──────────────────────────────────
 
@@ -95,6 +96,21 @@ async def handle_rate(ws):
                 print("❌ bad /rate message:", e)
     finally: print("⤵️  /rate disconnected")
 
+async def handle_radius(ws):
+    global arrival_radius_m
+    print("➰ /radius connected")
+    try:
+        async for msg in ws:
+            try:
+                data = json.loads(msg)
+                if 'radius' in data:
+                    arrival_radius_m = float(data['radius'])
+                    print(f"🔧 arrival-radius now {arrival_radius_m:.1f} m")
+            except Exception as e:
+                print("❌ bad /radius message:", e)
+    finally:
+        print("➰ /radius disconnected")
+
 # ───────── control helpers ─────────
 def hb_fcu():
     """Return next FCU (component-1) heartbeat, or None if none pending."""
@@ -124,7 +140,7 @@ async def guided_loop():
         if current_pos and target_pos:
             dist = haversine(current_pos['latitude'],current_pos['longitude'],
                              target_pos ['latitude'],target_pos ['longitude'])
-            if dist > ARRIVAL_THRESH_M:
+            if dist > arrival_radius_m:
                 pitch       = FWD_PITCH_RAD
                 desired_yaw = bearing(current_pos['latitude'],current_pos['longitude'],
                                       target_pos ['latitude'],target_pos ['longitude'])
@@ -153,7 +169,8 @@ async def main():
     await websockets.serve(handle_current,"0.0.0.0",8765)
     await websockets.serve(handle_target ,"0.0.0.0",8766)
     await websockets.serve(handle_rate   ,"0.0.0.0",8767)
-    print("🌐 sockets – /current:8765  /target:8766  /rate:8767")
+    await websockets.serve(handle_radius ,"0.0.0.0",8768)   # ← NEW
+    print("🌐 sockets – /current:8765  /target:8766  /rate:8767  /radius:8768")
 
     # 2) MAVLink
     print(f"→ Connecting to {SITL_URL}")
