@@ -2,36 +2,32 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>GPS WebSocket Tester&nbsp;+ VOR passthrough</title>
+<title>GPS + Turn-rate Tester</title>
 <style>
-  body        {font-family:sans-serif;max-width:640px;margin:auto;padding:1rem}
-  fieldset    {margin:1rem 0;padding:.8rem}
-  legend      {font-weight:bold}
-  label       {display:block;margin:.35rem 0}
+  body{font-family:sans-serif;max-width:660px;margin:auto;padding:1rem}
+  fieldset{margin:1rem 0;padding:.8rem}
+  legend{font-weight:bold}
+  label{display:block;margin:.35rem 0}
   input[type=text]{width:14rem}
-  .status     {margin:.5rem 0;font-weight:bold}
-  button      {margin-top:.4rem}
-  .disabled   {opacity:.45;pointer-events:none}
+  .status{margin:.5rem 0;font-weight:bold}
+  button{margin-top:.4rem}
+  .disabled{opacity:.45;pointer-events:none}
 </style>
 </head>
 <body>
 <h1>GPS WebSocket Tester</h1>
 
-<!-- ❶ Connection section -->
+<!-- ❶ Connection -->
 <fieldset>
   <legend>Server connection</legend>
   <label>Server IP / host:
     <input id="ip" type="text" value="127.0.0.1">
   </label>
 
-  <label>
-    <input id="useVor" type="checkbox" onchange="updateVorUI()">
-    Use external VOR Web-Socket
-  </label>
+  <label><input id="useVor" type="checkbox" onchange="updateVorUI()"> Use external VOR socket</label>
 
-  <!-- VOR controls are hidden unless checkbox is ticked -->
   <div id="vorBlock" style="display:none;margin-top:.6rem">
-    <label>VOR Web-Socket URL:
+    <label>VOR WebSocket&nbsp;URL:
       <input id="vorUrl" type="text" value="ws://localhost:9000">
     </label>
     <div class="status" id="statusVor">🛰 VOR: not connected</div>
@@ -42,125 +38,112 @@
 
   <div class="status" id="statusCur">🛰 /current: not connected</div>
   <div class="status" id="statusTgt">🎯 /target: not connected</div>
+  <div class="status" id="statusRate">⤵️ /rate: not connected</div>
 </fieldset>
 
-<!-- ❷ /current sender -->
+<!-- ❷ Turn-rate -->
+<fieldset>
+  <legend>Turn-rate (deg / s)</legend>
+  <label>
+    <input id="rateVal" type="text" value="10">
+  </label>
+  <button onclick="sendRate()">Send /rate</button>
+</fieldset>
+
+<!-- ❸ /current -->
 <fieldset id="curField">
   <legend>Send /current (drone position)</legend>
-  <label>Latitude
-    <input id="curLat"  type="text" value="39.417790">
-  </label>
-  <label>Longitude
-    <input id="curLon"  type="text" value="-76.615905">
-  </label>
-  <label>Declination (° optional)
-    <input id="curDec"  type="text" placeholder="null">
-  </label>
+  <label>Latitude  <input id="curLat" type="text" value="39.417790"></label>
+  <label>Longitude <input id="curLon" type="text" value="-76.615905"></label>
+  <label>Declination (° optional) <input id="curDec" type="text" placeholder="null"></label>
   <button onclick="sendCurrent()">Send /current</button>
 </fieldset>
 
-<!-- ❸ /target sender -->
+<!-- ❹ /target -->
 <fieldset>
   <legend>Send /target (way-point)</legend>
-  <label>Latitude
-    <input id="tgtLat"  type="text" value="39.417790">
-  </label>
-  <label>Longitude
-    <input id="tgtLon"  type="text" value="-76.615905">
-  </label>
-  <label>Declination (° optional)
-    <input id="tgtDec"  type="text" placeholder="null">
-  </label>
+  <label>Latitude  <input id="tgtLat" type="text" value="39.418000"></label>
+  <label>Longitude <input id="tgtLon" type="text" value="-76.616500"></label>
+  <label>Declination (° optional) <input id="tgtDec" type="text" placeholder="null"></label>
   <button onclick="sendTarget()">Send /target</button>
 </fieldset>
 
 <script>
-let wsCur=null, wsTgt=null, wsVor=null;
+let wsCur=null, wsTgt=null, wsVor=null, wsRate=null;
 
-/* ─── UI helpers ───────────────────────────────────────────── */
-function setStatus(idPrefix, msg){
-  const el = document.getElementById(
-    idPrefix === 'Cur' ? 'statusCur' :
-    idPrefix === 'Tgt' ? 'statusTgt' :
-    'statusVor'
-  );
-  el.textContent =
-    (idPrefix==='Cur'?'🛰 /current: ':
-     idPrefix==='Tgt'?'🎯 /target: ':
-     '🛰 VOR: ') + msg;
+/* ——— UI ——— */
+function setStatus(which,msg){
+  const id = which==='Cur'?'statusCur':
+             which==='Tgt'?'statusTgt':
+             which==='Rate'?'statusRate':'statusVor';
+  const prefix = which==='Cur'?'🛰 /current: ':
+                 which==='Tgt'?'🎯 /target: ':
+                 which==='Rate'?'⤵️ /rate: ':'🛰 VOR: ';
+  document.getElementById(id).textContent = prefix+msg;
 }
-
 function updateVorUI(){
-  const useVor = document.getElementById('useVor').checked;
-  document.getElementById('vorBlock').style.display = useVor ? 'block' : 'none';
-
-  // grey-out /current sender while VOR is active
-  const curFs = document.getElementById('curField');
-  if(useVor){ curFs.classList.add('disabled'); }
-  else       { curFs.classList.remove('disabled'); }
+  const on = document.getElementById('useVor').checked;
+  document.getElementById('vorBlock').style.display = on?'block':'none';
+  document.getElementById('curField').classList.toggle('disabled',on);
 }
 
-/* ─── Connection management ───────────────────────────────── */
+/* ——— connections ——— */
 function connectSockets(){
-  const host = document.getElementById('ip').value.trim();
-  if(!host){ return alert('Enter server IP / host'); }
+  const host=document.getElementById('ip').value.trim();
+  if(!host) return alert('Enter server IP/host');
 
-  // ❶  connect to gps.py sockets
   wsCur = new WebSocket(`ws://${host}:8765`);
-  wsCur.onopen  = ()=>setStatus('Cur','✅ connected');
-  wsCur.onclose = ()=>setStatus('Cur','🔌 disconnected');
-  wsCur.onerror = ()=>setStatus('Cur','❌ error');
+  wsCur.onopen =()=>setStatus('Cur','✅ connected');
+  wsCur.onclose=()=>setStatus('Cur','🔌 disconnected');
+  wsCur.onerror=()=>setStatus('Cur','❌ error');
 
   wsTgt = new WebSocket(`ws://${host}:8766`);
-  wsTgt.onopen  = ()=>setStatus('Tgt','✅ connected');
-  wsTgt.onclose = ()=>setStatus('Tgt','🔌 disconnected');
-  wsTgt.onerror = ()=>setStatus('Tgt','❌ error');
+  wsTgt.onopen =()=>setStatus('Tgt','✅ connected');
+  wsTgt.onclose=()=>setStatus('Tgt','🔌 disconnected');
+  wsTgt.onerror=()=>setStatus('Tgt','❌ error');
 
-  // ❷  optionally connect to external VOR stream
+  wsRate = new WebSocket(`ws://${host}:8767`);
+  wsRate.onopen =()=>setStatus('Rate','✅ connected');
+  wsRate.onclose=()=>setStatus('Rate','🔌 disconnected');
+  wsRate.onerror=()=>setStatus('Rate','❌ error');
+
   if(document.getElementById('useVor').checked){
-    const vorUrl = document.getElementById('vorUrl').value.trim();
-    if(!vorUrl){ alert('Enter VOR Web-Socket URL'); return; }
-
-    wsVor = new WebSocket(vorUrl);
-    wsVor.onopen  = ()=>setStatus('Vor','✅ connected');
-    wsVor.onclose = ()=>setStatus('Vor','🔌 disconnected');
-    wsVor.onerror = ()=>setStatus('Vor','❌ error');
-
-    // Passthrough: every VOR message → /current socket
-    wsVor.onmessage = e=>{
-      if(open(wsCur)){ wsCur.send(e.data); }
-    };
+    const url=document.getElementById('vorUrl').value.trim();
+    if(!url) return alert('Enter VOR URL');
+    wsVor = new WebSocket(url);
+    wsVor.onopen =()=>setStatus('Vor','✅ connected');
+    wsVor.onclose=()=>setStatus('Vor','🔌 disconnected');
+    wsVor.onerror=()=>setStatus('Vor','❌ error');
+    wsVor.onmessage=e=>{ if(isOpen(wsCur)) wsCur.send(e.data); };
   }
 }
-
 function disconnectSockets(){
-  [wsCur, wsTgt, wsVor].forEach(ws=>{ if(ws){ ws.close(); } });
-  wsCur=wsTgt=wsVor=null;
+  [wsCur,wsTgt,wsVor,wsRate].forEach(ws=>{ if(ws) ws.close(); });
+  wsCur=wsTgt=wsVor=wsRate=null;
 }
+const isOpen = ws=>ws && ws.readyState===WebSocket.OPEN;
 
-const open = ws => ws && ws.readyState === WebSocket.OPEN;
-
-/* ─── manual /current & /target senders ───────────────────── */
-function sendCurrent(){
-  if(!open(wsCur)){ return alert('🛰 /current not connected'); }
-  const payload = buildPayload('cur');
-  wsCur.send(JSON.stringify(payload));
-  alert('Sent /current:\n'+JSON.stringify(payload,null,2));
-}
-
-function sendTarget(){
-  if(!open(wsTgt)){ return alert('🎯 /target not connected'); }
-  const payload = buildPayload('tgt');
-  wsTgt.send(JSON.stringify(payload));
-  alert('Sent /target:\n'+JSON.stringify(payload,null,2));
-}
-
-function buildPayload(prefix){
-  const lat = parseFloat(document.getElementById(prefix+'Lat').value);
-  const lon = parseFloat(document.getElementById(prefix+'Lon').value);
-  let   dec = document.getElementById(prefix+'Dec').value.trim();
-  dec = dec ? parseFloat(dec) : null;
+/* ——— send helpers ——— */
+function buildPayload(pfx){
+  const lat=parseFloat(document.getElementById(pfx+'Lat').value);
+  const lon=parseFloat(document.getElementById(pfx+'Lon').value);
+  let dec=document.getElementById(pfx+'Dec').value.trim();
+  dec = dec?parseFloat(dec):null;
   return {latitude:lat, longitude:lon, declination:dec};
+}
+function sendCurrent(){
+  if(!isOpen(wsCur)) return alert('/current not connected');
+  const p=buildPayload('cur'); wsCur.send(JSON.stringify(p));
+}
+function sendTarget(){
+  if(!isOpen(wsTgt)) return alert('/target not connected');
+  const p=buildPayload('tgt'); wsTgt.send(JSON.stringify(p));
+}
+function sendRate(){
+  if(!isOpen(wsRate)) return alert('/rate not connected');
+  const val=parseFloat(document.getElementById('rateVal').value);
+  if(isNaN(val)||val<=0) return alert('enter positive number');
+  wsRate.send(JSON.stringify({turn_rate:val}));
 }
 </script>
 </body>
