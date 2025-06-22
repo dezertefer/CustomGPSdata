@@ -1,23 +1,28 @@
 #!/usr/bin/env python3
-# gps.py  –  attitude-only guidance while in GUIDED_NOGPS
+# gps.py  – attitude-only guidance while in GUIDED_NOGPS
 #
-# • Web-socket servers (8765 / 8766) stay up all the time.
-# • Attitude commands are sent only while the FCU (component-1 heartbeat)
-#   reports mode GUIDED_NOGPS.
+# Adds “turn-rate limiting”:  the yaw set-point is slewed toward the
+# desired bearing at ≤ TURN_RATE_DEG °/s.  
+# A 3ʳᵈ Web-Socket “/rate” (port 8767) lets the browser change that value
+# at run-time by sending  {"turn_rate": <deg_per_sec>}.
 
 import asyncio, json, math, time, websockets
 from   pymavlink import mavutil
 
 # ───────── configuration ─────────
-SITL_URL         = "udp:127.0.0.1:15550"
-STREAM_HZ        = 2
-FWD_PITCH_RAD    = -math.radians(5)     # ≈ –5°
-ARRIVAL_THRESH_M = 300
-HEX_PREFIX       = "Mode("              # ignore opaque hex names
+SITL_URL          = "udp:127.0.0.1:15550"
+STREAM_HZ         = 2
+FWD_PITCH_RAD     = -math.radians(5)    # ≈ –5 °
+ARRIVAL_THRESH_M  = 300
+HEX_PREFIX        = "Mode("             # ignore opaque hex names
 # ──────────────────────────────────
 
-mav, current_pos, target_pos = None, None, None
-t0 = time.monotonic()
+mav                           = None          # MAVLink connection
+current_pos, target_pos       = None, None    # last messages from sockets
+TURN_RATE_DEG_S               = 10.0          # default 10 °/s
+turn_rate_rad_s               = math.radians(TURN_RATE_DEG_S)
+cmd_yaw                        = 0.0          # yaw we are currently commanding
+t0                             = time.monotonic()
 
 # ───────── MAV helpers ─────────
 def q_from_euler(r,p,y):
@@ -49,15 +54,20 @@ def bearing(lat1,lon1,lat2,lon2):
     b=math.atan2(x,y)
     return b if b>=0 else b+2*math.pi
 
-# ───────── Web-socket handlers ─────────
+def ang_diff(target, current):
+    """Signed shortest-way angular difference (rad)."""
+    d = (target - current + math.pi) % (2*math.pi) - math.pi
+    return d
+
+# ───────── Web-Socket handlers ─────────
 async def handle_current(ws):
     global current_pos
-    print("🛰 /current connected")
+    print("🛰  /current connected")
     try:
         async for msg in ws:
-            try: current_pos=json.loads(msg)
+            try: current_pos = json.loads(msg)
             except json.JSONDecodeError: print("❌ bad /current JSON")
-    finally: print("🛰 /current disconnected")
+    finally: print("🛰  /current disconnected")
 
 async def handle_target(ws):
     global target_pos
@@ -65,72 +75,100 @@ async def handle_target(ws):
     try:
         async for msg in ws:
             try:
-                target_pos=json.loads(msg)
+                target_pos = json.loads(msg)
                 print(f"🎯 new target {target_pos}")
             except json.JSONDecodeError: print("❌ bad /target JSON")
     finally: print("🎯 /target disconnected")
+
+async def handle_rate(ws):
+    global TURN_RATE_DEG_S, turn_rate_rad_s
+    print("⤵️  /rate connected")
+    try:
+        async for msg in ws:
+            try:
+                data = json.loads(msg)
+                if 'turn_rate' in data:
+                    TURN_RATE_DEG_S = float(data['turn_rate'])
+                    turn_rate_rad_s = math.radians(TURN_RATE_DEG_S)
+                    print(f"🔧 turn-rate now {TURN_RATE_DEG_S:.1f} °/s")
+            except Exception as e:
+                print("❌ bad /rate message:", e)
+    finally: print("⤵️  /rate disconnected")
 
 # ───────── control helpers ─────────
 def hb_fcu():
     """Return next FCU (component-1) heartbeat, or None if none pending."""
     while True:
-        msg=mav.recv_match(type='HEARTBEAT',blocking=False)
-        if not msg: return None
-        if msg.get_srcComponent()==1: return msg     # 1 = flight-controller
+        msg = mav.recv_match(type='HEARTBEAT', blocking=False)
+        if not msg:                   return None
+        if msg.get_srcComponent()==1: return msg
 
 def is_guided_nogps(hb):
-    mode=mavutil.mode_string_v10(hb)
+    mode = mavutil.mode_string_v10(hb)
     return mode=="GUIDED_NOGPS" or mode.startswith(HEX_PREFIX)
 
 async def guided_loop():
     """Runs while FCU stays in GUIDED_NOGPS."""
+    global cmd_yaw
     arrived=False
+    dt=0.2
     while True:
-        hb=hb_fcu()
+        hb = hb_fcu()
         if hb and not is_guided_nogps(hb):
             print(f"🚫 Mode changed → {mavutil.mode_string_v10(hb)}")
             return                                  # stop commanding
 
-        yaw=pitch=0
+        desired_yaw = cmd_yaw       # default: keep previous
+        pitch        = 0.0
+
         if current_pos and target_pos:
-            dist=haversine(current_pos['latitude'],current_pos['longitude'],
-                           target_pos ['latitude'],target_pos ['longitude'])
-            if dist<=ARRIVAL_THRESH_M:
-                if not arrived:
-                    print(f"✅ arrived (≤{ARRIVAL_THRESH_M} m) – level")
-                    arrived=True
-            else:
-                arrived=False
-                yaw  =bearing(current_pos['latitude'],current_pos['longitude'],
-                              target_pos ['latitude'],target_pos ['longitude'])
-                pitch=FWD_PITCH_RAD
+            dist = haversine(current_pos['latitude'],current_pos['longitude'],
+                             target_pos ['latitude'],target_pos ['longitude'])
+            if dist > ARRIVAL_THRESH_M:
+                pitch       = FWD_PITCH_RAD
+                desired_yaw = bearing(current_pos['latitude'],current_pos['longitude'],
+                                      target_pos ['latitude'],target_pos ['longitude'])
+            elif not arrived:
+                print(f"✅ arrived (≤{ARRIVAL_THRESH_M} m) – level")
+                arrived = True
         else:
-            arrived=False
-        send_attitude(pitch,yaw)
-        await asyncio.sleep(0.2)
+            arrived = False
+
+        # --- rate-limit yaw -------------------------------------------------
+        dy   = ang_diff(desired_yaw, cmd_yaw)
+        step = turn_rate_rad_s * dt
+        if abs(dy) > step:
+            cmd_yaw += math.copysign(step, dy)
+            cmd_yaw %= 2*math.pi
+        else:
+            cmd_yaw = desired_yaw
+
+        send_attitude(pitch, cmd_yaw)
+        await asyncio.sleep(dt)
 
 # ───────── main ─────────
 async def main():
     global mav
-    # 1) websockets first
+    # 1) Web-Socket servers
     await websockets.serve(handle_current,"0.0.0.0",8765)
     await websockets.serve(handle_target ,"0.0.0.0",8766)
-    print("🌐 websockets on 8765 (/current) & 8766 (/target)")
+    await websockets.serve(handle_rate   ,"0.0.0.0",8767)
+    print("🌐 sockets – /current:8765  /target:8766  /rate:8767")
 
-    # 2) connect MAVLink
+    # 2) MAVLink
     print(f"→ Connecting to {SITL_URL}")
-    mav=mavutil.mavlink_connection(SITL_URL)
+    mav = mavutil.mavlink_connection(SITL_URL)
     mav.wait_heartbeat(); print("✅ Heartbeat received")
 
     mav.mav.request_data_stream_send(mav.target_system,mav.target_component,
         mavutil.mavlink.MAV_DATA_STREAM_ALL, STREAM_HZ, 1)
-    print(f"→ Requested DATA_STREAM_ALL @{STREAM_HZ} Hz")
+    print(f"→ Requested DATA_STREAM_ALL @ {STREAM_HZ} Hz")
 
-    # 3) wait-run-wait
+    # 3) state-machine
     while True:
         print("⏳ Awaiting GUIDED_NOGPS …")
         while True:
-            hb=hb_fcu()
+            hb = hb_fcu()
             if hb and is_guided_nogps(hb):
                 print("▶ GUIDED_NOGPS detected – control loop starts")
                 break
