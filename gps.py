@@ -145,46 +145,64 @@ def in_guided_nogps(hb):
 
 # ───────── main control loop ─────────
 async def guided_loop():
+    """
+    Runs while the FCU stays in GUIDED_NOGPS.
+
+    * No attitude commands are sent until BOTH /current and /target
+      have arrived.
+    * The very first real bearing we compute becomes the initial
+      commanded_yaw, so we keep whatever heading we had.
+    """
     global commanded_yaw
-    arrived = False
-    last_t  = time.monotonic()
+    arrived   = False
+    last_time = time.monotonic()
 
     while True:
-        # ① mode check
+        # ① mode guard -------------------------------------------------
         hb = hb_fcu()
         if hb and not in_guided_nogps(hb):
             print(f"🚫 Mode changed → {mavutil.mode_string_v10(hb)}")
-            return
+            return                                   # leave loop
 
-        # ② guidance maths
-        yaw_target = commanded_yaw
-        pitch      = 0
-        if current_pos and target_pos:
-            dist = haversine(current_pos['latitude'],current_pos['longitude'],
-                             target_pos ['latitude'],target_pos ['longitude'])
-            if dist <= arrival_radius_m:
-                if not arrived:
-                    print(f"✅ arrived (≤{arrival_radius_m} m) – level")
-                    arrived = True
-            else:
-                arrived = False
-                yaw_target = bearing(current_pos['latitude'],current_pos['longitude'],
-                                     target_pos ['latitude'],target_pos ['longitude'])
-                pitch = forward_pitch_rad
+        # ② need both feeds before we do anything ----------------------
+        if not (current_pos and target_pos):
+            await asyncio.sleep(0.1)
+            continue
+
+        # ③ compute distance & bearing --------------------------------
+        dist = haversine(current_pos['latitude'],current_pos['longitude'],
+                         target_pos ['latitude'],target_pos ['longitude'])
+        tgt_bearing = bearing(current_pos['latitude'],current_pos['longitude'],
+                              target_pos ['latitude'],target_pos ['longitude'])
+
+        # ④ first-time initialisation of commanded_yaw ----------------
+        if commanded_yaw is None:
+            commanded_yaw = tgt_bearing        # keep current nose-angle
+            # NB: we *don’t* send an attitude yet – next loop will
+
+        # ⑤ arrival test ----------------------------------------------
+        if dist <= arrival_radius_m:
+            if not arrived:
+                print(f"✅ arrived (≤{arrival_radius_m:.1f} m) – level")
+                arrived = True
+            pitch_cmd = 0
         else:
-            arrived = False
+            arrived   = False
+            pitch_cmd = forward_pitch_rad
 
-        # ③ turn-rate limiter
+        # ⑥ turn-rate limiter -----------------------------------------
         now = time.monotonic()
-        dt  = now - last_t
-        last_t = now
+        dt  = now - last_time
+        last_time = now
+
         max_step = math.radians(turn_rate_deg_s) * dt
-        diff = (yaw_target - commanded_yaw + math.pi) % (2*math.pi) - math.pi
+        diff = (tgt_bearing - commanded_yaw + math.pi) % (2*math.pi) - math.pi
         if abs(diff) > max_step:
             diff = math.copysign(max_step, diff)
         commanded_yaw = (commanded_yaw + diff + 2*math.pi) % (2*math.pi)
 
-        send_attitude(pitch, commanded_yaw)
+        # ⑦ finally, send the attitude --------------------------------
+        send_attitude(pitch_cmd, commanded_yaw)
         await asyncio.sleep(0.1)
 
 # ───────── program entry ─────────
