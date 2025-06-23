@@ -45,13 +45,16 @@ cd $HOME
 git clone https://github.com/ArduPilot/ardupilot.git
 cd ardupilot
 git submodule update --init --recursive
-
+```
+```bash
 ./Tools/environment_install/install-prereqs-ubuntu.sh -y
-exec $SHELL                        
-
+exec $SHELL
+```
+```bash                   
 pip install pexpect
 pip install empy==3.3.4 --break-system-packages
-
+```
+```bash
 ./waf configure --board sitl
 ./waf copter -j$(nproc)            
 ```
