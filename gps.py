@@ -66,13 +66,25 @@ def bearing(lat1,lon1,lat2,lon2):
     return b if b>=0 else b + 2*math.pi
 
 # ───────── websocket handlers ─────────
+# ───────── websocket handlers ─────────
 async def handle_current(ws):
+    """
+    Accepts messages like
+        {"latitude": 39.42, "longitude": -76.61, "declination": null}
+    Any packet that is missing either key is silently ignored, so
+    “status” pings from the VOR feed will no longer clobber current_pos.
+    """
     global current_pos
     print("🛰  /current connected")
     try:
         async for msg in ws:
-            try: current_pos = json.loads(msg)
-            except: print("❌ bad /current JSON")
+            try:
+                data = json.loads(msg)
+                if {'latitude', 'longitude'} <= data.keys():
+                    current_pos = data
+                # else: ignore status / heartbeat packets
+            except json.JSONDecodeError:
+                print("❌ bad /current JSON")
     finally:
         print("🛰  /current disconnected")
 
